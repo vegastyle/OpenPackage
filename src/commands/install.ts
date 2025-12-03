@@ -949,6 +949,10 @@ export function setupInstallCommand(program: Command): void {
     .option('--stable', 'prefer the latest stable version when resolving; ignore newer prerelease/WIP versions if a satisfying stable exists')
     .option('--profile <profile>', 'profile to use for authentication')
     .option('--api-key <key>', 'API key for authentication (overrides profile)')
+    .option('--registry <url>', 'add custom registry (repeatable, can be URL, IP, or local path)', (value: string, previous: string[]) => {
+      return previous ? [...previous, value] : [value];
+    }, [] as string[])
+    .option('--no-default-registry', 'only use specified registries (exclude default local and remote)')
     .action(withErrorHandling(async (packageName: string | undefined, targetDir: string, options: InstallOptions) => {
       // Normalize platforms option early for downstream logic
       options.platforms = normalizePlatforms(options.platforms);

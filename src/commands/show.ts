@@ -104,6 +104,10 @@ export function setupShowCommand(program: Command): void {
     .command('show')
     .description('Show details of a package. Supports versioning with package@version syntax.')
     .argument('<package-name>', 'name of the package to show. Supports package@version syntax.')
+    .option('--registry <url>', 'add custom registry (repeatable, can be URL, IP, or local path)', (value: string, previous: string[]) => {
+      return previous ? [...previous, value] : [value];
+    }, [] as string[])
+    .option('--no-default-registry', 'only use specified registries (exclude default local and remote)')
     .action(withErrorHandling(async (packageInput: string) => {
       await showPackageCommand(packageInput);
     }));

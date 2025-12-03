@@ -314,6 +314,10 @@ export function setupPullCommand(program: Command): void {
     .option('--profile <profile>', 'profile to use for authentication')
     .option('--api-key <key>', 'API key for authentication (overrides profile)')
     .option('--recursive', 'include dependency metadata (no additional downloads)')
+    .option('--registry <url>', 'add custom registry (repeatable, can be URL, IP, or local path)', (value: string, previous: string[]) => {
+      return previous ? [...previous, value] : [value];
+    }, [] as string[])
+    .option('--no-default-registry', 'only use specified registries (exclude default local and remote)')
     .action(withErrorHandling(async (packageName: string, options: PullOptions) => {
       const result = await pullPackageCommand(packageName, options);
       if (!result.success) {

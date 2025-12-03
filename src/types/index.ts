@@ -86,6 +86,8 @@ export interface ListOptions {
   filter?: string;
   all?: boolean;
   packageName?: string;
+  registry?: string[];  // Multiple custom registries
+  noDefaultRegistry?: boolean;  // Exclude default registries
 }
 
 export interface DeleteOptions {
@@ -133,6 +135,8 @@ export interface InstallOptions {
   conflictStrategy?: 'ask' | 'keep-both' | 'overwrite' | 'skip';
   conflictDecisions?: Record<string, 'keep-both' | 'overwrite' | 'skip'>;
   resolutionMode?: 'default' | 'remote-primary' | 'local-only';
+  registry?: string[];  // Multiple custom registries
+  noDefaultRegistry?: boolean;  // Exclude default registries
 }
 
 export interface UninstallOptions {
@@ -143,12 +147,23 @@ export interface UninstallOptions {
 export interface PushOptions {
   profile?: string;
   apiKey?: string;
+  registry?: string[];  // Multiple custom registries (uses first for push destination)
+  noDefaultRegistry?: boolean;  // Exclude default registries
 }
 
 export interface PullOptions {
   profile?: string;
   apiKey?: string;
   recursive?: boolean;
+  registry?: string[];  // Multiple custom registries
+  noDefaultRegistry?: boolean;  // Exclude default registries
+}
+
+export interface ShowOptions {
+  profile?: string;
+  apiKey?: string;
+  registry?: string[];  // Multiple custom registries
+  noDefaultRegistry?: boolean;  // Exclude default registries
 }
 
 export interface SaveOptions {

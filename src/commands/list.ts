@@ -84,6 +84,10 @@ export function setupListCommand(program: Command): void {
     .option('--format <format>', 'output format (table|json)', 'table')
     .option('--filter <pattern>', 'filter packages by name pattern')
     .option('--all', 'show all versions (default shows only latest)')
+    .option('--registry <url>', 'add custom registry (repeatable, can be URL, IP, or local path)', (value: string, previous: string[]) => {
+      return previous ? [...previous, value] : [value];
+    }, [] as string[])
+    .option('--no-default-registry', 'only use specified registries (exclude default local and remote)')
     .action(withErrorHandling(async (packageName: string | undefined, options: ListOptions) => {
       options.packageName = packageName;
       await listPackagesCommand(options);

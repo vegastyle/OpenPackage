@@ -25,6 +25,7 @@ import { parsePackageYml } from '../utils/package-yml.js';
 import { applyWorkspacePackageRename } from '../core/save/workspace-rename.js';
 import type { PackageYmlInfo } from '../core/save/package-yml-generator.js';
 import { getCurrentUsername } from '../core/api-keys.js';
+import { registryResolver } from '../core/registry-resolver.js';
 
 async function tryRenameWorkspacePackage(
   cwd: string,
@@ -157,14 +158,35 @@ async function pushPackageCommand(
       return { success: false, error: 'Only stable versions can be pushed' };
     }
     
-    // Authenticate and create HTTP client
-    const httpClient = await createHttpClient(authOptions);
-    
-    const registryUrl = authManager.getRegistryUrl();
+    // Determine push destination registry
+    let registryUrl: string;
+
+    if (options.registry && options.registry.length > 0) {
+      // Use first specified custom registry
+      registryUrl = options.registry[0];
+
+      // Validate it's a remote registry (not a local path)
+      const type = registryResolver.detectRegistryType(registryUrl);
+      if (type !== 'remote') {
+        console.error(`❌ Push registry must be a remote URL, not a local path: ${registryUrl}`);
+        console.log('💡 Use a URL like https://registry.example.com or http://localhost:3000');
+        return { success: false, error: 'Invalid push registry' };
+      }
+
+      logger.debug(`Using custom push registry: ${registryUrl}`);
+    } else {
+      // Use default remote registry
+      registryUrl = authManager.getRegistryUrl();
+    }
+
+    // Authenticate and create HTTP client with custom registry
+    const httpClient = await createHttpClient(authOptions, registryUrl);
+
     const profile = authManager.getCurrentProfile(authOptions);
     
     console.log(`✓ Pushing package '${packageNameToPush}' to remote registry...`);
     console.log(`✓ Version: ${versionToPush}`);
+    console.log(`✓ Registry: ${registryUrl}`);
     console.log(`✓ Profile: ${profile}`);
     console.log('');
     
@@ -301,6 +323,10 @@ export function setupPushCommand(program: Command): void {
     .argument('<package-name>', 'name of the package to push. Supports package@version syntax.')
     .option('--profile <profile>', 'profile to use for authentication')
     .option('--api-key <key>', 'API key for authentication (overrides profile)')
+    .option('--registry <url>', 'push to custom registry (uses first specified registry, must be remote URL)', (value: string, previous: string[]) => {
+      return previous ? [...previous, value] : [value];
+    }, [] as string[])
+    .option('--no-default-registry', 'only use specified registries (exclude default remote)')
     .action(withErrorHandling(async (packageName: string, options: PushOptions) => {
       const result = await pushPackageCommand(packageName, options);
       if (!result.success) {

@@ -251,8 +251,11 @@ export class HttpClient {
 /**
  * Create an HTTP client instance for the configured registry
  */
-export async function createHttpClient(authOptions?: AuthOptions): Promise<HttpClient> {
-  const registryUrl = authManager.getRegistryUrl();
+export async function createHttpClient(
+  authOptions?: AuthOptions,
+  customRegistryUrl?: string
+): Promise<HttpClient> {
+  const registryUrl = customRegistryUrl || authManager.getRegistryUrl();
 
   return new HttpClient({
     baseUrl: registryUrl,

@@ -15,6 +15,9 @@ import {
 import { isScopedName } from '../scoping/package-scoping.js';
 import { Spinner } from '../../utils/spinner.js';
 import { extractRemoteErrorReason } from '../../utils/error-reasons.js';
+import { registryResolver, type RegistryConfig } from '../registry-resolver.js';
+import { join } from 'path';
+import { exists, listDirectories } from '../../utils/fs.js';
 
 export interface VersionSourceSummary {
   localVersions: string[];
@@ -34,6 +37,8 @@ export interface GatherVersionSourcesArgs {
   remoteVersions?: string[];
   profile?: string;
   apiKey?: string;
+  customRegistries?: string[];
+  noDefaultRegistry?: boolean;
 }
 
 export interface InstallVersionSelectionArgs extends GatherVersionSourcesArgs {
@@ -61,6 +66,8 @@ export interface UnifiedInstallVersionSelectionArgs {
   localVersions?: string[];
   remoteVersions?: string[];
   filterAvailableVersions?: (versions: string[]) => string[];
+  customRegistries?: string[];
+  noDefaultRegistry?: boolean;
 }
 
 export interface UnifiedInstallVersionSelectionResult extends InstallVersionSelectionResult {
@@ -84,6 +91,8 @@ export class RemoteVersionLookupError extends Error {
 interface RemoteVersionLookupOptions {
   profile?: string;
   apiKey?: string;
+  customRegistries?: string[];
+  noDefaultRegistry?: boolean;
 }
 
 interface RemoteVersionLookupSuccess {
@@ -115,7 +124,9 @@ export async function gatherVersionSourcesForInstall(args: GatherVersionSourcesA
     } else {
       const remoteLookup = await fetchRemoteVersions(args.packageName, {
         profile: args.profile,
-        apiKey: args.apiKey
+        apiKey: args.apiKey,
+        customRegistries: args.customRegistries,
+        noDefaultRegistry: args.noDefaultRegistry
       });
 
       if (remoteLookup.success) {
@@ -247,7 +258,9 @@ export async function selectInstallVersionUnified(
     localVersions: args.localVersions,
     remoteVersions: args.remoteVersions,
     profile: args.profile,
-    apiKey: args.apiKey
+    apiKey: args.apiKey,
+    customRegistries: args.customRegistries,
+    noDefaultRegistry: args.noDefaultRegistry
   };
 
   if (args.mode === 'local-only') {
@@ -326,6 +339,12 @@ async function fetchRemoteVersions(
   }
 
   try {
+    // Use RegistryResolver if custom registries are specified
+    if (options.customRegistries && options.customRegistries.length > 0) {
+      return await fetchVersionsFromCustomRegistries(packageName, options);
+    }
+
+    // Otherwise use default remote fetch
     const metadataResult = await fetchRemotePackageMetadata(packageName, undefined, {
       profile: options.profile,
       apiKey: options.apiKey,
@@ -343,6 +362,91 @@ async function fetchRemoteVersions(
       spinner.stop();
     }
   }
+}
+
+/**
+ * Fetch versions from custom registries using RegistryResolver
+ */
+async function fetchVersionsFromCustomRegistries(
+  packageName: string,
+  options: RemoteVersionLookupOptions
+): Promise<RemoteVersionLookupResult> {
+  try {
+    // Resolve registries
+    const registries = registryResolver.resolveRegistries({
+      customRegistries: options.customRegistries,
+      noDefaultRegistry: options.noDefaultRegistry,
+      localOnly: false,
+      remoteOnly: false
+    });
+
+    // Collect all versions from all registries
+    const allVersions = new Set<string>();
+
+    for (const registry of registries) {
+      try {
+        if (registry.type === 'local') {
+          // For local registries, list versions directly
+          const versions = await listVersionsFromLocalRegistry(packageName, registry.url);
+          versions.forEach(v => allVersions.add(v));
+        } else {
+          // For remote registries, fetch metadata
+          const metadataResult = await fetchRemotePackageMetadata(packageName, undefined, {
+            profile: options.profile,
+            apiKey: options.apiKey,
+            recursive: false
+          });
+
+          if (metadataResult.success) {
+            const versions = extractVersionsFromRemoteResponse(metadataResult.response);
+            versions.forEach(v => allVersions.add(v));
+          }
+        }
+      } catch (error) {
+        // Graceful fallback - continue to next registry
+        continue;
+      }
+    }
+
+    if (allVersions.size === 0) {
+      return {
+        success: false,
+        failure: {
+          success: false,
+          reason: 'not-found',
+          message: `Package '${packageName}' not found in any specified registry`
+        }
+      };
+    }
+
+    return { success: true, versions: Array.from(allVersions) };
+  } catch (error) {
+    return {
+      success: false,
+      failure: {
+        success: false,
+        reason: 'unknown',
+        message: error instanceof Error ? error.message : 'Unknown error occurred'
+      }
+    };
+  }
+}
+
+/**
+ * List versions from a local registry directory
+ */
+async function listVersionsFromLocalRegistry(
+  packageName: string,
+  registryPath: string
+): Promise<string[]> {
+  const packagePath = join(registryPath, packageName);
+
+  if (!(await exists(packagePath))) {
+    return [];
+  }
+
+  const versions = await listDirectories(packagePath);
+  return versions.filter((v: string) => semver.valid(v));
 }
 
 function extractVersionsFromRemoteResponse(response: PullPackageResponse): string[] {
