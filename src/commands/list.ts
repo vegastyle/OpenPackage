@@ -88,6 +88,7 @@ export function setupListCommand(program: Command): void {
       return previous ? [...previous, value] : [value];
     }, [] as string[])
     .option('--no-default-registry', 'only use specified registries (exclude default local and remote)')
+    .option('--working-dir <path>', 'override working directory')
     .action(withErrorHandling(async (packageName: string | undefined, options: ListOptions) => {
       options.packageName = packageName;
       await listPackagesCommand(options);

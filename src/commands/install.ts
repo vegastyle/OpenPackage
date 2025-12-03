@@ -1,5 +1,6 @@
 import * as semver from 'semver';
 import { Command } from 'commander';
+import { resolve } from 'path';
 import { InstallOptions, CommandResult, PackageYml } from '../types/index.js';
 import { ResolvedPackage } from '../core/dependency-resolver.js';
 import { ensureRegistryDirectories, listPackageVersions } from '../core/directory.js';
@@ -90,7 +91,7 @@ async function installAllPackagesCommand(
   targetDir: string,
   options: InstallOptions
 ): Promise<CommandResult> {
-  const cwd = process.cwd();
+  const cwd = options.workingDir ? resolve(process.cwd(), options.workingDir) : process.cwd();
   logger.info(`Installing all packages from package.yml to: ${getAIDir(cwd)}`, { options });
   
   await ensureRegistryDirectories();
@@ -323,7 +324,7 @@ async function installPackageCommand(
   options: InstallOptions,
   version?: string
 ): Promise<CommandResult> {
-  const cwd = process.cwd();
+  const cwd = options.workingDir ? resolve(process.cwd(), options.workingDir) : process.cwd();
 
   const resolutionMode: InstallResolutionMode = options.resolutionMode ?? determineResolutionMode(options);
 
@@ -953,6 +954,7 @@ export function setupInstallCommand(program: Command): void {
       return previous ? [...previous, value] : [value];
     }, [] as string[])
     .option('--no-default-registry', 'only use specified registries (exclude default local and remote)')
+    .option('--working-dir <path>', 'override working directory')
     .action(withErrorHandling(async (packageName: string | undefined, targetDir: string, options: InstallOptions) => {
       // Normalize platforms option early for downstream logic
       options.platforms = normalizePlatforms(options.platforms);

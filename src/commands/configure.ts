@@ -1,5 +1,5 @@
 import { Command } from 'commander';
-import { CommandResult } from '../types/index.js';
+import { BaseCommandOptions, CommandResult } from '../types/index.js';
 import { profileManager } from '../core/profiles.js';
 import { ensureOpenPackageDirectories } from '../core/directory.js';
 import { logger } from '../utils/logger.js';
@@ -11,7 +11,7 @@ import { showApiKeySignupMessage } from '../utils/messages.js';
  * Configure command implementation for profile management
  */
 
-interface ConfigureOptions {
+interface ConfigureOptions extends BaseCommandOptions {
   profile?: string;
   list?: boolean;
   delete?: string | boolean;
@@ -218,6 +218,7 @@ export function setupConfigureCommand(program: Command): void {
     .option('--profile <name>', 'profile name to configure')
     .option('--list', 'list all configured profiles')
     .option('--delete <name>', 'delete the specified profile')
+    .option('--working-dir <path>', 'override working directory')
     .action(withErrorHandling(async (options: ConfigureOptions) => {
       const result = await configureCommand(options);
       if (!result.success) {

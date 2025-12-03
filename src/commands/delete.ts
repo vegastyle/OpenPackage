@@ -184,6 +184,7 @@ export function setupDeleteCommand(program: Command): void {
     .argument('<package>', 'package name or package@version to delete. Use package@baseVersion to delete all prerelease versions of that base version.')
     .option('-f, --force', 'skip confirmation prompt')
     .option('-i, --interactive', 'interactively select version to delete')
+    .option('--working-dir <path>', 'override working directory')
     .action(withErrorHandling(async (pkg: string, options: DeleteOptions) => {
       const result = await deletePackageCommand(pkg, options);
       if (!result.success) {

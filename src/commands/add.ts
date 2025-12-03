@@ -7,6 +7,7 @@ import {
   resolve
 } from 'path';
 import {
+  BaseCommandOptions,
   CommandResult,
   PackageFile,
   PackageYml
@@ -79,7 +80,7 @@ interface EnsurePackageResult {
 
 type ConflictDecision = 'keep-existing' | 'overwrite';
 
-interface AddCommandOptions {
+interface AddCommandOptions extends BaseCommandOptions {
   platformSpecific?: boolean;
 }
 
@@ -95,13 +96,14 @@ export function setupAddCommand(program: Command): void {
       '  opkg add my-package ai/helpers/\n'
     )
     .option('--platform-specific', 'Save platform-specific variants for platform subdir inputs')
+    .option('--working-dir <path>', 'override working directory')
     .action(withErrorHandling(async (packageName: string, inputPath: string, options: AddCommandOptions) => {
       await runAddCommand(packageName, inputPath, options);
     }));
 }
 
 async function runAddCommand(packageName: string, inputPath: string, options: AddCommandOptions = {}): Promise<CommandResult<void>> {
-  const cwd = process.cwd();
+  const cwd = options.workingDir ? resolve(process.cwd(), options.workingDir) : process.cwd();
 
   // Validate and inspect the input path first
   const resolvedInputPath = resolve(cwd, inputPath);

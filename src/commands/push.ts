@@ -1,5 +1,5 @@
 import { Command } from 'commander';
-import { join } from 'path';
+import { join, resolve } from 'path';
 import { PushOptions, CommandResult } from '../types/index.js';
 import { PushPackageResponse } from '../types/api.js';
 import { packageManager } from '../core/package.js';
@@ -64,7 +64,7 @@ async function pushPackageCommand(
   options: PushOptions
 ): Promise<CommandResult> {
   logger.info(`Pushing package '${packageInput}' to remote registry`, { options });
-  const cwd = process.cwd();
+  const cwd = options.workingDir ? resolve(process.cwd(), options.workingDir) : process.cwd();
   const { name: parsedName, version: parsedVersion } = parsePackageInput(packageInput);
   let packageNameToPush = parsedName;
   let attemptedVersion: string | undefined;
@@ -327,6 +327,7 @@ export function setupPushCommand(program: Command): void {
       return previous ? [...previous, value] : [value];
     }, [] as string[])
     .option('--no-default-registry', 'only use specified registries (exclude default remote)')
+    .option('--working-dir <path>', 'override working directory')
     .action(withErrorHandling(async (packageName: string, options: PushOptions) => {
       const result = await pushPackageCommand(packageName, options);
       if (!result.success) {

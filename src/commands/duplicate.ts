@@ -76,7 +76,8 @@ export function setupDuplicateCommand(program: Command): void {
     .description('Duplicate a package in the local registry to a new name and optional version')
     .argument('<package>', 'source package name or package@version')
     .argument('<newName>', 'new package name or newName@version')
-    .action(withErrorHandling(async (pkg: string, newName: string) => {
+    .option('--working-dir <path>', 'override working directory')
+    .action(withErrorHandling(async (pkg: string, newName: string, options?: { workingDir?: string }) => {
       const result = await duplicatePackageCommand(pkg, newName);
       if (!result.success) {
         // If we already printed a user-friendly message, just exit with error

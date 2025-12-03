@@ -1,5 +1,5 @@
 import { Command } from 'commander';
-import { basename, join, relative } from 'path';
+import { basename, join, relative, resolve } from 'path';
 import { CommandResult, PackageYml } from '../types/index.js';
 import { parsePackageYml, writePackageYml } from '../utils/package-yml.js';
 import { promptPackageDetails, promptPackageDetailsForNamed } from '../utils/prompts.js';
@@ -15,8 +15,8 @@ import { createBasicPackageYml, addPackageToYml } from '../utils/package-managem
 /**
  * Initialize package.yml command implementation
  */
-async function initPackageCommand(force?: boolean): Promise<CommandResult> {
-  const packageDir = process.cwd();
+async function initPackageCommand(force?: boolean, workingDir?: string): Promise<CommandResult> {
+  const packageDir = workingDir ? resolve(process.cwd(), workingDir) : process.cwd();
   const openpackageDir = getLocalOpenPackageDir(packageDir);
   const packageYmlPath = getLocalPackageYmlPath(packageDir);
 
@@ -107,8 +107,8 @@ async function initPackageCommand(force?: boolean): Promise<CommandResult> {
 /**
  * Initialize package.yml in the packages directory for a specific package name
  */
-async function initPackageInPackagesDir(packageName: string, force?: boolean): Promise<CommandResult> {
-  const cwd = process.cwd();
+async function initPackageInPackagesDir(packageName: string, force?: boolean, workingDir?: string): Promise<CommandResult> {
+  const cwd = workingDir ? resolve(process.cwd(), workingDir) : process.cwd();
 
   // Validate and normalize package name for consistent behavior
   validatePackageName(packageName);
@@ -190,14 +190,15 @@ export function setupInitCommand(program: Command): void {
       '  opkg init                    # Initialize .openpackage/package.yml in current directory\n' +
       '  opkg init <package-name>     # Initialize .openpackage/packages/<package-name>/package.yml')
     .option('-f, --force', 'overwrite existing root .openpackage/package.yml (no effect for named init root patch)')
-    .action(withErrorHandling(async (packageName?: string, options?: { force?: boolean }) => {
+    .option('--working-dir <path>', 'override working directory')
+    .action(withErrorHandling(async (packageName?: string, options?: { force?: boolean; workingDir?: string }) => {
       if (packageName) {
-        const result = await initPackageInPackagesDir(packageName, options?.force);
+        const result = await initPackageInPackagesDir(packageName, options?.force, options?.workingDir);
         if (!result.success) {
           throw new Error(result.error || 'Init operation failed');
         }
       } else {
-        const result = await initPackageCommand(options?.force);
+        const result = await initPackageCommand(options?.force, options?.workingDir);
         if (!result.success) {
           throw new Error(result.error || 'Init operation failed');
         }

@@ -81,7 +81,15 @@ export interface PackageYml {
 
 // Command option types
 
-export interface ListOptions {
+/**
+ * Base interface for all command options
+ * Provides common options available to all commands
+ */
+export interface BaseCommandOptions {
+  workingDir?: string;
+}
+
+export interface ListOptions extends BaseCommandOptions {
   format: 'table' | 'json';
   filter?: string;
   all?: boolean;
@@ -90,12 +98,12 @@ export interface ListOptions {
   noDefaultRegistry?: boolean;  // Exclude default registries
 }
 
-export interface DeleteOptions {
+export interface DeleteOptions extends BaseCommandOptions {
   force?: boolean;
   interactive?: boolean;   // Interactive version selection
 }
 
-export interface PruneOptions {
+export interface PruneOptions extends BaseCommandOptions {
   all?: boolean;           // Delete ALL prerelease versions (no preservation)
   dryRun?: boolean;        // Show what would be deleted
   force?: boolean;         // Skip all confirmations
@@ -120,7 +128,7 @@ export interface PruneResult {
   errors: string[];
 }
 
-export interface InstallOptions {
+export interface InstallOptions extends BaseCommandOptions {
   dryRun?: boolean;
   force?: boolean;
   variables?: Record<string, any>;
@@ -139,19 +147,19 @@ export interface InstallOptions {
   noDefaultRegistry?: boolean;  // Exclude default registries
 }
 
-export interface UninstallOptions {
+export interface UninstallOptions extends BaseCommandOptions {
   dryRun?: boolean;
   recursive?: boolean;
 }
 
-export interface PushOptions {
+export interface PushOptions extends BaseCommandOptions {
   profile?: string;
   apiKey?: string;
   registry?: string[];  // Multiple custom registries (uses first for push destination)
   noDefaultRegistry?: boolean;  // Exclude default registries
 }
 
-export interface PullOptions {
+export interface PullOptions extends BaseCommandOptions {
   profile?: string;
   apiKey?: string;
   recursive?: boolean;
@@ -159,19 +167,19 @@ export interface PullOptions {
   noDefaultRegistry?: boolean;  // Exclude default registries
 }
 
-export interface ShowOptions {
+export interface ShowOptions extends BaseCommandOptions {
   profile?: string;
   apiKey?: string;
   registry?: string[];  // Multiple custom registries
   noDefaultRegistry?: boolean;  // Exclude default registries
 }
 
-export interface SaveOptions {
+export interface SaveOptions extends BaseCommandOptions {
   force?: boolean;
   rename?: string;
 }
 
-export interface PackOptions {
+export interface PackOptions extends BaseCommandOptions {
   force?: boolean;
   rename?: string;
 }

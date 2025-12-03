@@ -6,8 +6,9 @@ import {
 } from './save-conflict-resolution.js';
 
 export async function discoverPackageFilesForSave(
+  cwd: string,
   packageInfo: PackageYmlInfo,
   options: SaveConflictResolutionOptions = {}
 ): Promise<PackageFile[]> {
-  return await resolvePackageFilesWithConflicts(packageInfo, options);
+  return await resolvePackageFilesWithConflicts(cwd, packageInfo, options);
 }

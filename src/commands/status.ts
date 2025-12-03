@@ -1,7 +1,7 @@
 import { Command } from 'commander';
-import { join } from 'path';
+import { join, resolve } from 'path';
 import * as semver from 'semver';
-import { CommandResult, PackageYml, PackageDependency } from '../types/index.js';
+import { BaseCommandOptions, CommandResult, PackageYml, PackageDependency } from '../types/index.js';
 import { parsePackageYml } from '../utils/package-yml.js';
 import { ensureRegistryDirectories, listPackageVersions } from '../core/directory.js';
 import { GroundzeroPackage, gatherGlobalVersionConstraints, gatherRootVersionConstraints } from '../core/openpackage.js';
@@ -88,7 +88,7 @@ interface ProjectStatus {
 /**
  * Status analysis options
  */
-interface StatusOptions {
+interface StatusOptions extends BaseCommandOptions {
   registry?: boolean;
   platforms?: boolean;
 }
@@ -96,7 +96,7 @@ interface StatusOptions {
 /**
  * Command options
  */
-interface CommandOptions {
+interface CommandOptions extends BaseCommandOptions {
   flat?: boolean;
   depth?: number;
   registry?: boolean;
@@ -877,7 +877,7 @@ function displayStatusSummary(packages: PackageStatusInfo[], statusCounts: Retur
  * Enhanced status command implementation with comprehensive analysis
  */
 async function statusCommand(options: CommandOptions = {}): Promise<CommandResult> {
-  const cwd = process.cwd();
+  const cwd = options.workingDir ? resolve(process.cwd(), options.workingDir) : process.cwd();
   logger.info(`Checking package status for directory: ${cwd}`, { options });
   // Set a global verbose flag for renderer (avoids threading through many calls)
   (globalThis as any).__statusVerbose = Boolean(options.verbose);
@@ -940,6 +940,7 @@ export function setupStatusCommand(program: Command): void {
     .option('--platforms', 'show platform-specific status information')
     .option('--repair', 'show repair suggestions without applying them')
     .option('--verbose', 'show file-level details')
+    .option('--working-dir <path>', 'override working directory')
     .action(withErrorHandling(async (options: CommandOptions) => {
       await statusCommand(options);
     }));

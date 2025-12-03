@@ -1,4 +1,5 @@
 import { Command } from 'commander';
+import { resolve } from 'path';
 import { SaveOptions, CommandResult } from '../types/index.js';
 import { ensureRegistryDirectories } from '../core/directory.js';
 import { logger } from '../utils/logger.js';
@@ -30,7 +31,7 @@ async function savePackageCommand(
   packageName: string,
   options?: SaveOptions
 ): Promise<CommandResult> {
-  const cwd = process.cwd();
+  const cwd = options?.workingDir ? resolve(process.cwd(), options.workingDir) : process.cwd();
 
   // Ensure the workspace-level package.yml exists for dependency tracking
   await createBasicPackageYml(cwd);
@@ -121,7 +122,7 @@ async function savePackageCommand(
 
   // Discover and process files directly into package files array
   // Only use explicit --force flag to skip prompts; WIP versions should still prompt for conflicts
-  const packageFiles = await discoverPackageFilesForSave(packageInfo, {
+  const packageFiles = await discoverPackageFilesForSave(cwd, packageInfo, {
     force: options?.force
   });
 
@@ -225,6 +226,7 @@ export function setupSaveCommand(program: Command): void {
       'Use `opkg pack` to create a stable copy in the registry.')
     .option('-f, --force', 'overwrite existing version or skip confirmations')
     .option('--rename <newName>', 'Rename package during save')
+    .option('--working-dir <path>', 'override working directory')
     .action(withErrorHandling(async (packageName: string, options?: SaveOptions) => {
       const result = await savePackageCommand(packageName, options);
       if (!result.success) {

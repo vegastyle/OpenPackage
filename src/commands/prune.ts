@@ -431,6 +431,7 @@ export function setupPruneCommand(program: Command): void {
     .option('--dry-run', 'show what would be deleted without doing it')
     .option('-f, --force', 'skip confirmation prompts')
     .option('-i, --interactive', 'interactively select versions to delete')
+    .option('--working-dir <path>', 'override working directory')
     .action(withErrorHandling(async (packageName?: string, options?: PruneOptions) => {
       const result = await pruneCommand(packageName, options);
       if (!result.success) {

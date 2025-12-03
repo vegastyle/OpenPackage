@@ -38,10 +38,10 @@ export interface SaveConflictResolutionOptions {
 }
 
 export async function resolvePackageFilesWithConflicts(
+  cwd: string,
   packageInfo: PackageYmlInfo,
   options: SaveConflictResolutionOptions = {}
 ): Promise<PackageFile[]> {
-  const cwd = process.cwd();
   const packageDir = getLocalPackageDir(cwd, packageInfo.config.name);
 
   if (!(await exists(packageDir)) || !(await isDirectory(packageDir))) {

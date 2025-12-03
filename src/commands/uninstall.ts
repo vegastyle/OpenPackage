@@ -1,5 +1,5 @@
 import { Command } from 'commander';
-import { join, relative, dirname } from 'path';
+import { join, relative, dirname, resolve } from 'path';
 import { readdir } from 'fs/promises';
 import { UninstallOptions, CommandResult } from '../types/index.js';
 import { parsePackageYml, writePackageYml } from '../utils/package-yml.js';
@@ -283,8 +283,8 @@ async function uninstallPackageCommand(
   
   // Ensure registry directories exist
   await ensureRegistryDirectories();
-  
-  const cwd = process.cwd();
+
+  const cwd = options.workingDir ? resolve(process.cwd(), options.workingDir) : process.cwd();
   const aiRootPath = getAIDir(cwd);
   const openpackagePath = targetDir && targetDir !== '.'
     ? join(aiRootPath, targetDir.startsWith('/') ? targetDir.slice(1) : targetDir)
@@ -520,6 +520,7 @@ export function setupUninstallCommand(program: Command): void {
     .argument('[target-dir]', 'target directory (defaults to current directory)', '.')
     .option('--dry-run', 'preview changes without applying them')
     .option('--recursive', 'recursively remove dangling dependencies (packages not depended upon by any remaining packages, excluding those listed in cwd package.yml)')
+    .option('--working-dir <path>', 'override working directory')
     .action(withErrorHandling(async (packageName: string, targetDir: string, options: UninstallOptions) => {
       const result = await uninstallPackageCommand(packageName, targetDir, options);
       if (!result.success && result.error !== 'Package not found') {

@@ -1,7 +1,7 @@
 import { basename } from 'path';
 import { isJunk } from 'junk';
 import { Command } from 'commander';
-import { CommandResult } from '../types/index.js';
+import { CommandResult, ShowOptions } from '../types/index.js';
 import { ensureRegistryDirectories } from '../core/directory.js';
 import { logger } from '../utils/logger.js';
 import { withErrorHandling, PackageNotFoundError } from '../utils/errors.js';
@@ -12,7 +12,7 @@ import { packageManager } from '../core/package.js';
 /**
  * Show package details command implementation (supports package@version)
  */
-async function showPackageCommand(packageInput: string): Promise<CommandResult> {
+async function showPackageCommand(packageInput: string, options?: ShowOptions): Promise<CommandResult> {
   logger.debug(`Showing details for package input: ${packageInput}`);
   
   // Ensure registry directories exist
@@ -108,7 +108,8 @@ export function setupShowCommand(program: Command): void {
       return previous ? [...previous, value] : [value];
     }, [] as string[])
     .option('--no-default-registry', 'only use specified registries (exclude default local and remote)')
-    .action(withErrorHandling(async (packageInput: string) => {
-      await showPackageCommand(packageInput);
+    .option('--working-dir <path>', 'override working directory')
+    .action(withErrorHandling(async (packageInput: string, options: ShowOptions) => {
+      await showPackageCommand(packageInput, options);
     }));
 }

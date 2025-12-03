@@ -37,6 +37,7 @@ program
   .alias('opkg ')
   .description('OpenPackage - The Package Manager for AI Coding')
   .version(getVersion())
+  .option('--working-dir <path>', 'Specify working directory (default: current directory)')
   .configureHelp({
     sortSubcommands: true,
   });
