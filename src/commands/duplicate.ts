@@ -77,7 +77,9 @@ export function setupDuplicateCommand(program: Command): void {
     .argument('<package>', 'source package name or package@version')
     .argument('<newName>', 'new package name or newName@version')
     .option('--working-dir <path>', 'override working directory')
-    .action(withErrorHandling(async (pkg: string, newName: string, options?: { workingDir?: string }) => {
+    .action(withErrorHandling(async (pkg: string, newName: string, options: { workingDir?: string } | undefined, command) => {
+      const parentOpts = command.parent?.opts() || {};
+      options = { ...parentOpts, ...options };
       const result = await duplicatePackageCommand(pkg, newName);
       if (!result.success) {
         // If we already printed a user-friendly message, just exit with error

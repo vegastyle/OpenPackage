@@ -432,7 +432,9 @@ export function setupPruneCommand(program: Command): void {
     .option('-f, --force', 'skip confirmation prompts')
     .option('-i, --interactive', 'interactively select versions to delete')
     .option('--working-dir <path>', 'override working directory')
-    .action(withErrorHandling(async (packageName?: string, options?: PruneOptions) => {
+    .action(withErrorHandling(async (packageName: string | undefined, options: PruneOptions | undefined, command) => {
+      const parentOpts = command.parent?.opts() || {};
+      options = { ...parentOpts, ...options };
       const result = await pruneCommand(packageName, options);
       if (!result.success) {
         throw new Error(result.error || 'Prune operation failed');

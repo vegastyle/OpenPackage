@@ -185,7 +185,9 @@ export function setupDeleteCommand(program: Command): void {
     .option('-f, --force', 'skip confirmation prompt')
     .option('-i, --interactive', 'interactively select version to delete')
     .option('--working-dir <path>', 'override working directory')
-    .action(withErrorHandling(async (pkg: string, options: DeleteOptions) => {
+    .action(withErrorHandling(async (pkg: string, options: DeleteOptions, command) => {
+      const parentOpts = command.parent?.opts() || {};
+      options = { ...parentOpts, ...options };
       const result = await deletePackageCommand(pkg, options);
       if (!result.success) {
         throw new Error(result.error || 'Delete operation failed');

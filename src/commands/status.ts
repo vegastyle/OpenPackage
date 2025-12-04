@@ -483,7 +483,7 @@ async function performStatusAnalysis(
   }
 
   const [detectedByFrontmatter, localMetadata] = await Promise.all([
-    discoverPackagesForStatus(Array.from(packageNames)),
+    discoverPackagesForStatus(cwd, Array.from(packageNames)),
     scanLocalPackageMetadata(cwd)
   ]);
 
@@ -941,8 +941,12 @@ export function setupStatusCommand(program: Command): void {
     .option('--repair', 'show repair suggestions without applying them')
     .option('--verbose', 'show file-level details')
     .option('--working-dir <path>', 'override working directory')
-    .action(withErrorHandling(async (options: CommandOptions) => {
-      await statusCommand(options);
+    .action(withErrorHandling(async (options: CommandOptions, command) => {
+      // Merge parent (global) options with command options
+      // This is necessary because Commander.js passes global options through parent.opts()
+      const parentOpts = command.parent?.opts() || {};
+      const mergedOptions = { ...parentOpts, ...options };
+      await statusCommand(mergedOptions);
     }));
 }
 

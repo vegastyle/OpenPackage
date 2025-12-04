@@ -955,7 +955,11 @@ export function setupInstallCommand(program: Command): void {
     }, [] as string[])
     .option('--no-default-registry', 'only use specified registries (exclude default local and remote)')
     .option('--working-dir <path>', 'override working directory')
-    .action(withErrorHandling(async (packageName: string | undefined, targetDir: string, options: InstallOptions) => {
+    .action(withErrorHandling(async (packageName: string | undefined, targetDir: string, options: InstallOptions, command) => {
+      // Merge parent (global) options with command options
+      const parentOpts = command.parent?.opts() || {};
+      options = { ...parentOpts, ...options };
+
       // Normalize platforms option early for downstream logic
       options.platforms = normalizePlatforms(options.platforms);
 

@@ -10,6 +10,7 @@ import { extractPackageContentFromRootFile } from '../../utils/root-file-extract
  * Returns detailed file information for packages in the config
  */
 export async function discoverPackagesForStatus(
+  cwd: string,
   packageNames: string[]
 ): Promise<Map<string, {
   aiFiles: string[];
@@ -22,7 +23,6 @@ export async function discoverPackagesForStatus(
   rootFiles?: string[];
   anyPath?: string
 }>> {
-  const cwd = process.cwd();
   const result = new Map<string, {
     aiFiles: string[];
     platforms: Record<string, {

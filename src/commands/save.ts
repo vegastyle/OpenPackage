@@ -227,7 +227,9 @@ export function setupSaveCommand(program: Command): void {
     .option('-f, --force', 'overwrite existing version or skip confirmations')
     .option('--rename <newName>', 'Rename package during save')
     .option('--working-dir <path>', 'override working directory')
-    .action(withErrorHandling(async (packageName: string, options?: SaveOptions) => {
+    .action(withErrorHandling(async (packageName: string, options: SaveOptions | undefined, command) => {
+      const parentOpts = command.parent?.opts() || {};
+      options = { ...parentOpts, ...options };
       const result = await savePackageCommand(packageName, options);
       if (!result.success) {
         throw new Error(result.error || 'Save operation failed');

@@ -328,7 +328,9 @@ export function setupPushCommand(program: Command): void {
     }, [] as string[])
     .option('--no-default-registry', 'only use specified registries (exclude default remote)')
     .option('--working-dir <path>', 'override working directory')
-    .action(withErrorHandling(async (packageName: string, options: PushOptions) => {
+    .action(withErrorHandling(async (packageName: string, options: PushOptions, command) => {
+      const parentOpts = command.parent?.opts() || {};
+      options = { ...parentOpts, ...options };
       const result = await pushPackageCommand(packageName, options);
       if (!result.success) {
         throw new Error(result.error || 'Push operation failed');

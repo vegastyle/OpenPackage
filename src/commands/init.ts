@@ -191,7 +191,9 @@ export function setupInitCommand(program: Command): void {
       '  opkg init <package-name>     # Initialize .openpackage/packages/<package-name>/package.yml')
     .option('-f, --force', 'overwrite existing root .openpackage/package.yml (no effect for named init root patch)')
     .option('--working-dir <path>', 'override working directory')
-    .action(withErrorHandling(async (packageName?: string, options?: { force?: boolean; workingDir?: string }) => {
+    .action(withErrorHandling(async (packageName: string | undefined, options: { force?: boolean; workingDir?: string } | undefined, command) => {
+      const parentOpts = command.parent?.opts() || {};
+      options = { ...parentOpts, ...options };
       if (packageName) {
         const result = await initPackageInPackagesDir(packageName, options?.force, options?.workingDir);
         if (!result.success) {

@@ -196,7 +196,9 @@ export function setupPackCommand(program: Command): void {
     .option('-f, --force', 'overwrite existing stable versions or skip confirmations')
     .option('--rename <newName>', 'Rename package during pack')
     .option('--working-dir <path>', 'override working directory')
-    .action(withErrorHandling(async (packageName: string, options?: PackOptions) => {
+    .action(withErrorHandling(async (packageName: string, options: PackOptions | undefined, command) => {
+      const parentOpts = command.parent?.opts() || {};
+      options = { ...parentOpts, ...options };
       const result = await packPackageCommand(packageName, options);
       if (!result.success) {
         throw new Error(result.error || 'Pack operation failed');

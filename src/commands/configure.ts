@@ -219,7 +219,9 @@ export function setupConfigureCommand(program: Command): void {
     .option('--list', 'list all configured profiles')
     .option('--delete <name>', 'delete the specified profile')
     .option('--working-dir <path>', 'override working directory')
-    .action(withErrorHandling(async (options: ConfigureOptions) => {
+    .action(withErrorHandling(async (options: ConfigureOptions, command) => {
+      const parentOpts = command.parent?.opts() || {};
+      options = { ...parentOpts, ...options };
       const result = await configureCommand(options);
       if (!result.success) {
         throw new Error(result.error || 'Configure operation failed');

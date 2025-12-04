@@ -109,7 +109,9 @@ export function setupShowCommand(program: Command): void {
     }, [] as string[])
     .option('--no-default-registry', 'only use specified registries (exclude default local and remote)')
     .option('--working-dir <path>', 'override working directory')
-    .action(withErrorHandling(async (packageInput: string, options: ShowOptions) => {
+    .action(withErrorHandling(async (packageInput: string, options: ShowOptions, command) => {
+      const parentOpts = command.parent?.opts() || {};
+      options = { ...parentOpts, ...options };
       await showPackageCommand(packageInput, options);
     }));
 }

@@ -97,7 +97,9 @@ export function setupAddCommand(program: Command): void {
     )
     .option('--platform-specific', 'Save platform-specific variants for platform subdir inputs')
     .option('--working-dir <path>', 'override working directory')
-    .action(withErrorHandling(async (packageName: string, inputPath: string, options: AddCommandOptions) => {
+    .action(withErrorHandling(async (packageName: string, inputPath: string, options: AddCommandOptions, command) => {
+      const parentOpts = command.parent?.opts() || {};
+      options = { ...parentOpts, ...options };
       await runAddCommand(packageName, inputPath, options);
     }));
 }

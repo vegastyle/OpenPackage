@@ -89,7 +89,9 @@ export function setupListCommand(program: Command): void {
     }, [] as string[])
     .option('--no-default-registry', 'only use specified registries (exclude default local and remote)')
     .option('--working-dir <path>', 'override working directory')
-    .action(withErrorHandling(async (packageName: string | undefined, options: ListOptions) => {
+    .action(withErrorHandling(async (packageName: string | undefined, options: ListOptions, command) => {
+      const parentOpts = command.parent?.opts() || {};
+      options = { ...parentOpts, ...options };
       options.packageName = packageName;
       await listPackagesCommand(options);
     }));

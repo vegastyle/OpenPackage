@@ -521,7 +521,9 @@ export function setupUninstallCommand(program: Command): void {
     .option('--dry-run', 'preview changes without applying them')
     .option('--recursive', 'recursively remove dangling dependencies (packages not depended upon by any remaining packages, excluding those listed in cwd package.yml)')
     .option('--working-dir <path>', 'override working directory')
-    .action(withErrorHandling(async (packageName: string, targetDir: string, options: UninstallOptions) => {
+    .action(withErrorHandling(async (packageName: string, targetDir: string, options: UninstallOptions, command) => {
+      const parentOpts = command.parent?.opts() || {};
+      options = { ...parentOpts, ...options };
       const result = await uninstallPackageCommand(packageName, targetDir, options);
       if (!result.success && result.error !== 'Package not found') {
         throw new Error(result.error || 'Uninstall operation failed');

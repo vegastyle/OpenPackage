@@ -319,7 +319,9 @@ export function setupPullCommand(program: Command): void {
     }, [] as string[])
     .option('--no-default-registry', 'only use specified registries (exclude default local and remote)')
     .option('--working-dir <path>', 'override working directory')
-    .action(withErrorHandling(async (packageName: string, options: PullOptions) => {
+    .action(withErrorHandling(async (packageName: string, options: PullOptions, command) => {
+      const parentOpts = command.parent?.opts() || {};
+      options = { ...parentOpts, ...options };
       const result = await pullPackageCommand(packageName, options);
       if (!result.success) {
         throw new Error(result.error || 'Pull operation failed');
