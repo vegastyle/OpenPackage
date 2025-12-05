@@ -21,6 +21,7 @@ import { setupPushCommand } from './commands/push.js';
 import { setupPullCommand } from './commands/pull.js';
 import { setupConfigureCommand } from './commands/configure.js';
 import { setupDuplicateCommand } from './commands/duplicate.js';
+import { setupLoginCommand } from './commands/login.js';
 
 /**
  * OpenPackage CLI - Main entry point
@@ -63,6 +64,7 @@ setupPullCommand(program);
 
 // === CONFIGURATION ===
 setupConfigureCommand(program);
+setupLoginCommand(program);
 
 // === GLOBAL ERROR HANDLING ===
 

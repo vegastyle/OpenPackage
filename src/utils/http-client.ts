@@ -11,6 +11,7 @@ export interface RequestOptions {
   headers?: Record<string, string>;
   timeout?: number;
   signal?: AbortSignal;
+	skipAuth?: boolean;
 }
 
 export interface HttpClientOptions {
@@ -119,7 +120,7 @@ export class HttpClient {
     logger.debug(`${method} ${url}`);
     
     // Get authentication headers
-    const authHeaders = await this.getAuthHeaders();
+    const authHeaders = options?.skipAuth ? {} : await this.getAuthHeaders();
     
     // Merge headers
     const headers = {

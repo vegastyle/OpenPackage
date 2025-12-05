@@ -110,8 +110,10 @@ class ProfileManager {
         logger.debug('Credentials file does not exist, creating new one');
       }
       
-      // Set the API key for the profile
-      setIniValue(credentialsData, profileName, 'api_key', credentials.api_key);
+      // Set credentials for the profile (API key only)
+      if (credentials.api_key !== undefined) {
+        setIniValue(credentialsData, profileName, 'api_key', credentials.api_key);
+      }
       
       // Write back to file
       await writeIniFile(this.credentialsPath, credentialsData);
