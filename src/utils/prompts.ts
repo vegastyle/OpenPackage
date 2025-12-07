@@ -5,7 +5,6 @@ import { UserCancellationError } from './errors.js';
 import { PLATFORM_DEFINITIONS } from '../core/platforms.js';
 import { normalizePackageName, validatePackageName } from './package-name.js';
 import { readTextFile } from './fs.js';
-import { DEFAULT_VERSION } from '../core/save/constants.js';
 
 /**
  * Common prompt types and utilities for user interaction
@@ -103,19 +102,6 @@ export async function promptPackageDetails(defaultName?: string): Promise<Packag
     },
     {
       type: 'text',
-      name: 'version',
-      message: 'Version (leave empty for unversioned):',
-      initial: DEFAULT_VERSION,
-      validate: (value: string) => {
-        if (!value) return true;
-        if (!/^\d+\.\d+\.\d+/.test(value)) {
-          return 'Version should follow semantic versioning (e.g., 1.0.0) or be empty';
-        }
-        return true;
-      }
-    },
-    {
-      type: 'text',
       name: 'description',
       message: 'Description:'
     },
@@ -139,7 +125,6 @@ export async function promptPackageDetails(defaultName?: string): Promise<Packag
 
   const config: PackageYml = {
     name: normalizePackageName(response.name),
-    ...(response.version ? { version: response.version } : {}),
     ...(response.description && { description: response.description }),
     ...(keywordsArray.length > 0 && { keywords: keywordsArray }),
     ...(response.private && { private: response.private })
@@ -153,19 +138,6 @@ export async function promptPackageDetails(defaultName?: string): Promise<Packag
  */
 export async function promptPackageDetailsForNamed(packageName: string): Promise<PackageYml> {
   const response = await safePrompts([
-    {
-      type: 'text',
-      name: 'version',
-      message: 'Version (leave empty for unversioned):',
-      initial: DEFAULT_VERSION,
-      validate: (value: string) => {
-        if (!value) return true;
-        if (!/^\d+\.\d+\.\d+/.test(value)) {
-          return 'Version should follow semantic versioning (e.g., 1.0.0) or be empty';
-        }
-        return true;
-      }
-    },
     {
       type: 'text',
       name: 'description',
@@ -191,7 +163,6 @@ export async function promptPackageDetailsForNamed(packageName: string): Promise
 
   const config: PackageYml = {
     name: normalizePackageName(packageName),
-    ...(response.version ? { version: response.version } : {}),
     ...(response.description && { description: response.description }),
     ...(keywordsArray.length > 0 && { keywords: keywordsArray }),
     ...(response.private && { private: response.private })

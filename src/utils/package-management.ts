@@ -159,6 +159,7 @@ export async function addPackageToYml(
   if (!config[DEPENDENCY_ARRAYS.DEV_PACKAGES]) config[DEPENDENCY_ARRAYS.DEV_PACKAGES] = [];
 
   const normalizedPackageName = normalizePackageName(packageName);
+  const nameWithVersion = packageVersion ? `${packageName}@${packageVersion}` : packageName;
   const packagesArray = config.packages;
   const devPackagesArray = config[DEPENDENCY_ARRAYS.DEV_PACKAGES]!;
 
@@ -244,10 +245,10 @@ export async function addPackageToYml(
   let targetArray: 'packages' | 'dev-packages';
   if (currentLocation === DEPENDENCY_ARRAYS.DEV_PACKAGES && !isDev) {
     targetArray = DEPENDENCY_ARRAYS.DEV_PACKAGES;
-    logger.info(`Keeping package in dev-packages: ${packageName}@${packageVersion}`);
+    logger.info(`Keeping package in dev-packages: ${nameWithVersion}`);
   } else if (currentLocation === DEPENDENCY_ARRAYS.PACKAGES && isDev) {
     targetArray = DEPENDENCY_ARRAYS.DEV_PACKAGES;
-    logger.info(`Moving package from packages to dev-packages: ${packageName}@${packageVersion}`);
+    logger.info(`Moving package from packages to dev-packages: ${nameWithVersion}`);
   } else {
     targetArray = isDev ? DEPENDENCY_ARRAYS.DEV_PACKAGES : DEPENDENCY_ARRAYS.PACKAGES;
   }
@@ -271,15 +272,15 @@ export async function addPackageToYml(
     if (versionChanged || filesChanged) {
       targetArrayRef[existingTargetIndex] = dependency;
       if (!silent) {
-        logger.info(`Updated existing package dependency: ${packageName}@${packageVersion}`);
-        console.log(`✓ Updated ${packageName}@${packageVersion} in main package.yml`);
+        logger.info(`Updated existing package dependency: ${nameWithVersion}`);
+        console.log(`✓ Updated ${nameWithVersion} in main package.yml`);
       }
     }
   } else {
     targetArrayRef.push(dependency);
     if (!silent) {
-      logger.info(`Added new package dependency: ${packageName}@${packageVersion}`);
-      console.log(`✓ Added ${packageName}@${packageVersion} to main package.yml`);
+      logger.info(`Added new package dependency: ${nameWithVersion}`);
+      console.log(`✓ Added ${nameWithVersion} to main package.yml`);
     }
   }
   
