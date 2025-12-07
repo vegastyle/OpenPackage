@@ -7,6 +7,7 @@ import { withErrorHandling, PackageNotFoundError } from '../utils/errors.js';
 import { Package, CommandResult } from '../types/index.js';
 import { parsePackageInput } from '../utils/package-name.js';
 import { transformPackageFilesMetadata } from '../utils/package-versioning.js';
+import { UNVERSIONED } from '../constants/index.js';
 
 async function duplicatePackageCommand(
   sourceInput: string,
@@ -65,9 +66,12 @@ async function duplicatePackageCommand(
   // Save duplicated package
   await packageManager.savePackage(newPackage);
 
-  console.log(`✓ Duplicated '${sourceName}@${sourcePackage.metadata.version}' -> '${newName}@${newVersion}'`);
+  const fromLabel = sourcePackage.metadata.version ? `${sourceName}@${sourcePackage.metadata.version}` : `${sourceName} (${UNVERSIONED})`;
+  const toLabel = newVersion ? `${newName}@${newVersion}` : `${newName} (${UNVERSIONED})`;
 
-  return { success: true, data: { from: `${sourceName}@${sourcePackage.metadata.version}`, to: `${newName}@${newVersion}` } };
+  console.log(`✓ Duplicated '${fromLabel}' -> '${toLabel}'`);
+
+  return { success: true, data: { from: fromLabel, to: toLabel } };
 }
 
 export function setupDuplicateCommand(program: Command): void {

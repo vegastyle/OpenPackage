@@ -51,10 +51,10 @@ export interface InstallationPhasesResult {
   allAddedFiles: string[];
   allUpdatedFiles: string[];
   rootFileResults: { installed: string[]; updated: string[]; skipped: string[] };
-  totalGroundzeroFiles: number;
+  totalOpenPackageFiles: number;
 }
 
-export interface GroundzeroPackageResult {
+export interface OpenPackagePackageResult {
   name: string;
   filesInstalled: number;
   filesUpdated: number;
@@ -281,7 +281,7 @@ export async function performIndexBasedInstallationPhases(params: InstallationPh
       updated: Array.from(rootFileResults.updated),
       skipped: Array.from(rootFileResults.skipped)
     },
-    totalGroundzeroFiles: totalInstalled + totalUpdated
+    totalOpenPackageFiles: totalInstalled + totalUpdated
   };
 }
 

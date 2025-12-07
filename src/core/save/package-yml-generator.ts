@@ -3,7 +3,8 @@ import { normalizePackageName } from '../../utils/package-name.js';
 import { logger } from '../../utils/logger.js';
 import { getPackageFilesDir, getPackageYmlPath, getPackageRootDir, type PackageContext } from '../package-context.js';
 import { ensurePackageWithYml } from '../../utils/package-management.js';
-import { DEFAULT_VERSION, LOG_PREFIXES } from './constants.js';
+import { LOG_PREFIXES } from './constants.js';
+import { UNVERSIONED } from '../../constants/index.js';
 import { applyWorkspacePackageRename } from './workspace-rename.js';
 
 export interface LoadPackageOptions {
@@ -16,17 +17,19 @@ export async function readOrCreateBasePackageYml(
 ): Promise<PackageContext> {
   const normalizedName = normalizePackageName(name);
   const ensured = await ensurePackageWithYml(cwd, normalizedName, {
-    defaultVersion: DEFAULT_VERSION
+    defaultVersion: undefined
   });
 
   if (ensured.isNew) {
     logger.debug('No package.yml found for save, creating', { dir: ensured.packageDir });
     console.log(`${LOG_PREFIXES.CREATED} ${ensured.packageDir}`);
     console.log(`${LOG_PREFIXES.NAME} ${ensured.packageConfig.name}`);
-    console.log(`${LOG_PREFIXES.VERSION} ${ensured.packageConfig.version}`);
+    console.log(`${LOG_PREFIXES.VERSION} ${ensured.packageConfig.version ?? UNVERSIONED}`);
   } else {
     logger.debug('Found existing package.yml for save', { path: ensured.packageYmlPath });
-    console.log(`✓ Found existing package ${ensured.packageConfig.name}@${ensured.packageConfig.version}`);
+    console.log(
+      `✓ Found existing package ${ensured.packageConfig.name}${ensured.packageConfig.version ? `@${ensured.packageConfig.version}` : ''}`
+    );
   }
 
   // ensured.packageDir is the content directory (.openpackage/), so package root is parent

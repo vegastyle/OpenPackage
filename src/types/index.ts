@@ -60,7 +60,7 @@ export interface PackageRepository {
 // Package.yml file types
 export interface PackageDependency {
   name: string;
-  version: string;
+  version?: string;
   /**
    * Optional list of registry-relative file paths to install for this dependency.
    * When provided (non-empty), installs are partial and limited to these paths.
@@ -71,7 +71,7 @@ export interface PackageDependency {
 
 export interface PackageYml {
   name: string;
-  version: string;
+  version?: string;
   private?: boolean;
 
   /**

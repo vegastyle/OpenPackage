@@ -71,7 +71,7 @@ export async function savePackageToRegistry(
  */
 async function clearExistingVersion(
   packageName: string,
-  version: string,
+  version: string | undefined,
   versionDir: string
 ): Promise<void> {
   if (await packageVersionExists(packageName, version)) {

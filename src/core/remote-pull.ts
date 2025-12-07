@@ -9,6 +9,7 @@ import { extractPackageFromTarball, verifyTarballIntegrity, ExtractedPackage } f
 import { logger } from '../utils/logger.js';
 import { ConfigError, ValidationError } from '../utils/errors.js';
 import { PACKAGE_PATHS } from '../constants/index.js';
+import { formatVersionLabel } from '../utils/package-versioning.js';
 
 const NETWORK_ERROR_PATTERN = /(fetch failed|ENOTFOUND|EAI_AGAIN|ECONNREFUSED|ECONNRESET|ETIMEDOUT|EHOSTUNREACH|ENETUNREACH|network)/i;
 
@@ -374,7 +375,7 @@ export async function pullPackageFromRemote(
     return {
       success: true,
       name: response.package.name,
-      version: response.version.version,
+      version: formatVersionLabel(response.version.version),
       response,
       extracted,
       registryUrl: context.registryUrl,

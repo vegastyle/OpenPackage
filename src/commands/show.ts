@@ -8,6 +8,7 @@ import { withErrorHandling, PackageNotFoundError } from '../utils/errors.js';
 import { describeVersionRange, isExactVersion } from '../utils/version-ranges.js';
 import { parsePackageInput } from '../utils/package-name.js';
 import { packageManager } from '../core/package.js';
+import { formatVersionLabel } from '../utils/package-versioning.js';
 
 /**
  * Show package details command implementation (supports package@version)
@@ -56,20 +57,22 @@ async function showPackageCommand(packageInput: string): Promise<CommandResult> 
     if (metadata.packages && metadata.packages.length > 0) {
       console.log(`✓ Imported Packages (${metadata.packages.length}):`);
       for (const dep of metadata.packages) {
-        const rangeDescription = !isExactVersion(dep.version) 
+        const versionLabel = formatVersionLabel(dep.version);
+        const rangeDescription = dep.version && !isExactVersion(dep.version) 
           ? ` (${describeVersionRange(dep.version)})`
           : '';
-        console.log(`  • ${dep.name}@${dep.version}${rangeDescription}`);
+        console.log(`  • ${dep.name}@${versionLabel}${rangeDescription}`);
       }
     }
     
     if (metadata['dev-packages'] && metadata['dev-packages'].length > 0) {
       console.log(`✓ Imported Dev Packages (${metadata['dev-packages'].length}):`);
       for (const dep of metadata['dev-packages']) {
-        const rangeDescription = !isExactVersion(dep.version) 
+        const versionLabel = formatVersionLabel(dep.version);
+        const rangeDescription = dep.version && !isExactVersion(dep.version) 
           ? ` (${describeVersionRange(dep.version)})`
           : '';
-        console.log(`  • ${dep.name}@${dep.version}${rangeDescription}`);
+        console.log(`  • ${dep.name}@${versionLabel}${rangeDescription}`);
       }
     }
     

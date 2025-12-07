@@ -13,7 +13,7 @@ export interface ApiPackage {
 }
 
 export interface ApiPackageVersion {
-  version: string;
+  version?: string;
   tarballSize: number;
   createdAt: string;
   updatedAt: string;

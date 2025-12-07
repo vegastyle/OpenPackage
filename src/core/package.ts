@@ -26,7 +26,7 @@ import {
   resolveVersionRange,
   isExactVersion
 } from '../utils/version-ranges.js';
-import { PACKAGE_PATHS } from '../constants/index.js';
+import { PACKAGE_PATHS, UNVERSIONED } from '../constants/index.js';
 
 /**
  * Package management operations
@@ -45,7 +45,9 @@ export class PackageManager {
     
     let targetVersion: string | null;
     
-    if (version) {
+    if (version === UNVERSIONED) {
+      targetVersion = UNVERSIONED;
+    } else if (version) {
       // Check if it's a version range or exact version
       if (isExactVersion(version)) {
         targetVersion = version;
@@ -107,7 +109,7 @@ export class PackageManager {
     const { metadata, files } = pkg;
     const packagePath = getPackageVersionPath(metadata.name, metadata.version);
     
-    logger.debug(`Saving package: ${metadata.name}@${metadata.version}`, { packagePath });
+    logger.debug(`Saving package: ${metadata.name}@${metadata.version ?? UNVERSIONED}`, { packagePath });
     
     try {
       // Ensure the version directory exists

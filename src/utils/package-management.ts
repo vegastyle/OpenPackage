@@ -41,7 +41,6 @@ export async function createWorkspacePackageYml(cwd: string, force: boolean = fa
   const projectName = basename(cwd);
   const basicPackageYml: PackageYml = {
     name: projectName,
-    version: '0.1.0',
     packages: [],
     'dev-packages': []
   };
@@ -104,7 +103,7 @@ export async function ensurePackageWithYml(
     } else {
       packageConfig = {
         name: normalizedName,
-        version: options.defaultVersion ?? '0.1.0'
+        ...(options.defaultVersion ? { version: options.defaultVersion } : {})
       };
     }
 
@@ -116,7 +115,9 @@ export async function ensurePackageWithYml(
     }
 
     await writePackageYml(packageYmlPath, packageConfig);
-    logger.info(`Created new package '${packageConfig.name}@${packageConfig.version}' at ${relative(cwd, packageDir)}`);
+    logger.info(
+      `Created new package '${packageConfig.name}${packageConfig.version ? `@${packageConfig.version}` : ''}' at ${relative(cwd, packageDir)}`
+    );
   }
 
   if (packageConfig.name !== normalizedName) {
@@ -141,7 +142,7 @@ export async function ensurePackageWithYml(
 export async function addPackageToYml(
   cwd: string,
   packageName: string,
-  packageVersion: string,
+  packageVersion: string | undefined,
   isDev: boolean = false,
   originalVersion?: string, // The original version/range that was requested
   silent: boolean = false,
@@ -182,36 +183,40 @@ export async function addPackageToYml(
       ? config[currentLocation]![existingIndex]?.version
       : undefined;
 
-  const baseVersion = extractBaseVersion(packageVersion);
-  const defaultRange = createCaretRange(baseVersion);
-  let versionToWrite = originalVersion ?? defaultRange;
+  let versionToWrite: string | undefined = originalVersion;
 
-  if (!originalVersion && existingRange) {
-    const hasPrereleaseIntent = hasExplicitPrereleaseIntent(existingRange);
-    const isNewVersionStable = !isPrereleaseVersion(packageVersion);
+  if (packageVersion) {
+    const baseVersion = extractBaseVersion(packageVersion);
+    const defaultRange = createCaretRange(baseVersion);
+    versionToWrite = originalVersion ?? defaultRange;
 
-    if (hasPrereleaseIntent) {
-      if (isNewVersionStable) {
-        // Constraint has explicit prerelease intent and we're packing a stable
-        // version on the same base line: normalize to a stable caret.
-        versionToWrite = createCaretRange(baseVersion);
-        logger.debug(
-          `Updating range from prerelease-including '${existingRange}' to stable '${versionToWrite}' ` +
-          `for ${packageName} (pack transition to ${packageVersion})`
-        );
-      } else {
-        // For prerelease-intent ranges during saves (prerelease versions),
-        // always preserve the existing constraint.
+    if (!originalVersion && existingRange) {
+      const hasPrereleaseIntent = hasExplicitPrereleaseIntent(existingRange);
+      const isNewVersionStable = !isPrereleaseVersion(packageVersion);
+
+      if (hasPrereleaseIntent) {
+        if (isNewVersionStable) {
+          // Constraint has explicit prerelease intent and we're packing a stable
+          // version on the same base line: normalize to a stable caret.
+          versionToWrite = createCaretRange(baseVersion);
+          logger.debug(
+            `Updating range from prerelease-including '${existingRange}' to stable '${versionToWrite}' ` +
+            `for ${packageName} (pack transition to ${packageVersion})`
+          );
+        } else {
+          // For prerelease-intent ranges during saves (prerelease versions),
+          // always preserve the existing constraint.
+          versionToWrite = existingRange;
+        }
+      } else if (rangeIncludesVersion(existingRange, baseVersion)) {
+        // Stable (non-prerelease) constraint that already includes the new base
+        // version: keep it unchanged.
         versionToWrite = existingRange;
+      } else {
+        // Stable constraint that does not include the new base version: bump to
+        // a new caret on the packed stable.
+        versionToWrite = defaultRange;
       }
-    } else if (rangeIncludesVersion(existingRange, baseVersion)) {
-      // Stable (non-prerelease) constraint that already includes the new base
-      // version: keep it unchanged.
-      versionToWrite = existingRange;
-    } else {
-      // Stable constraint that does not include the new base version: bump to
-      // a new caret on the packed stable.
-      versionToWrite = defaultRange;
     }
   }
 
@@ -230,7 +235,7 @@ export async function addPackageToYml(
 
   const dependency: PackageDependency = {
     name: normalizedPackageName,
-    version: versionToWrite,
+    ...(versionToWrite ? { version: versionToWrite } : {}),
     ...(filesToWrite ? { files: filesToWrite } : {})
   };
   

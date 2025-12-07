@@ -15,6 +15,7 @@ import {
 import { isScopedName } from '../scoping/package-scoping.js';
 import { Spinner } from '../../utils/spinner.js';
 import { extractRemoteErrorReason } from '../../utils/error-reasons.js';
+import { UNVERSIONED } from '../../constants/index.js';
 
 export interface VersionSourceSummary {
   localVersions: string[];
@@ -378,13 +379,20 @@ function extractVersionsFromRemoteResponse(response: PullPackageResponse): strin
 
 function extractVersionString(candidate: unknown): string | null {
   if (typeof candidate === 'string') {
+    if (candidate === UNVERSIONED) return UNVERSIONED;
     return semver.valid(candidate) ? candidate : null;
   }
 
   if (candidate && typeof candidate === 'object') {
     const value = (candidate as any).version;
-    if (typeof value === 'string' && semver.valid(value)) {
-      return value;
+    if (value === undefined || value === null) {
+      return UNVERSIONED;
+    }
+    if (typeof value === 'string') {
+      if (value === UNVERSIONED) return UNVERSIONED;
+      if (semver.valid(value)) {
+        return value;
+      }
     }
   }
 
@@ -393,21 +401,43 @@ function extractVersionString(candidate: unknown): string | null {
 
 function normalizeAndSortVersions(versions: string[]): string[] {
   const normalized = new Set<string>();
+  let hasUnversioned = false;
   for (const version of versions) {
     if (typeof version !== 'string') {
       continue;
     }
     const trimmed = version.trim();
-    if (!trimmed || !semver.valid(trimmed)) {
+    if (!trimmed) {
+      continue;
+    }
+    if (trimmed === UNVERSIONED) {
+      hasUnversioned = true;
+      continue;
+    }
+    if (!semver.valid(trimmed)) {
       continue;
     }
     normalized.add(trimmed);
   }
-  return Array.from(normalized).sort(semver.rcompare);
+  const sorted = Array.from(normalized).sort(semver.rcompare);
+  return hasUnversioned ? [...sorted, UNVERSIONED] : sorted;
 }
 
 function mergeAndSortVersions(left: string[], right: string[]): string[] {
-  const merged = new Set<string>([...left, ...right]);
-  return Array.from(merged).sort(semver.rcompare);
+  const merged = new Set<string>();
+  let hasUnversioned = false;
+
+  for (const version of [...left, ...right]) {
+    if (version === UNVERSIONED) {
+      hasUnversioned = true;
+      continue;
+    }
+    if (semver.valid(version)) {
+      merged.add(version);
+    }
+  }
+
+  const sorted = Array.from(merged).sort(semver.rcompare);
+  return hasUnversioned ? [...sorted, UNVERSIONED] : sorted;
 }
 

@@ -98,13 +98,18 @@ export async function runSavePipeline(
   const workspaceHash = createWorkspaceHash(cwd);
   const workspaceTag = createWorkspaceTag(cwd);
 
+  const baseVersion = packageContext.config.version;
+  if (!baseVersion) {
+    throw new Error('package.yml must contain a version to run this command.');
+  }
+
   let targetVersion: string;
   let shouldBumpPackageYml = false;
   let nextStable: string | undefined;
 
   if (mode === 'wip') {
     const wipInfo = computeWipVersion(
-      packageContext.config.version,
+      baseVersion,
       indexRecord?.workspace?.version,
       cwd
     );
@@ -114,7 +119,7 @@ export async function runSavePipeline(
     nextStable = wipInfo.nextStable;
   } else {
     const packInfo = computePackTargetVersion(
-      packageContext.config.version,
+      baseVersion,
       indexRecord?.workspace?.version
     );
     if (packInfo.resetMessage) console.log(packInfo.resetMessage);

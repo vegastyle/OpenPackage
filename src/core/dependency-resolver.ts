@@ -3,7 +3,7 @@ import * as semver from 'semver';
 import { safePrompts } from '../utils/prompts.js';
 import { PackageYml, Package } from '../types/index.js';
 import { packageManager } from './package.js';
-import { getInstalledPackageVersion, scanGroundzeroPackages } from './openpackage.js';
+import { getInstalledPackageVersion, scanOpenPackagePackages } from './openpackage.js';
 import { logger } from '../utils/logger.js';
 import { PackageNotFoundError, PackageVersionNotFoundError, VersionConflictError } from '../utils/errors.js';
 import { hasExplicitPrereleaseIntent } from '../utils/version-ranges.js';
@@ -12,7 +12,8 @@ import { registryManager } from './registry.js';
 import { selectInstallVersionUnified, RemoteVersionLookupError } from './install/version-selection.js';
 import { InstallResolutionMode, type PackageRemoteResolutionOutcome } from './install/types.js';
 import { extractRemoteErrorReason } from '../utils/error-reasons.js';
-import { PACKAGE_PATHS } from '../constants/index.js';
+import { PACKAGE_PATHS, UNVERSIONED } from '../constants/index.js';
+import { formatVersionLabel } from '../utils/package-versioning.js';
 
 /**
  * Resolved package interface for dependency resolution
@@ -166,6 +167,7 @@ export async function resolveDependencies(
   };
 
   const localVersions = await listPackageVersions(packageName);
+  const hasUnversionedLocal = localVersions.includes(UNVERSIONED);
   const explicitPrereleaseIntent = allRanges.some(range => hasExplicitPrereleaseIntent(range));
 
   let selectionResult;
@@ -222,28 +224,42 @@ export async function resolveDependencies(
   }
 
   const filteredAvailable = filterAvailableVersions(selectionResult.sources.availableVersions);
+  const hasUnversionedAvailable = hasUnversionedLocal || selectionResult.sources.availableVersions.includes(UNVERSIONED);
 
   if (!selectionResult.selectedVersion) {
-    if (filteredAvailable.length > 0) {
+    if (!hasConstraints && hasUnversionedAvailable) {
+      resolvedVersion = UNVERSIONED;
+      versionRange = undefined;
+      resolutionSource = hasUnversionedLocal ? 'local' : 'remote';
+    } else if (filteredAvailable.length > 0) {
       throw new VersionConflictError(packageName, {
         ranges: allRanges,
         availableVersions: selectionResult.sources.availableVersions
       });
+    } else {
+      missing.add(packageName);
+      return buildResolveResult(resolvedPackages, missing, remoteOutcomes);
     }
-
-    missing.add(packageName);
-    return buildResolveResult(resolvedPackages, missing, remoteOutcomes);
+  } else {
+    resolvedVersion = selectionResult.selectedVersion;
   }
 
-  resolvedVersion = selectionResult.selectedVersion;
-  versionRange = combinedRangeLabel;
-  resolutionSource =
-    selectionResult.resolutionSource ?? (resolutionMode === 'remote-primary' ? 'remote' : 'local');
-  logger.debug(
-    `Resolved constraints [${allRanges.join(', ')}] to '${resolvedVersion}' for package '${packageName}'`
-  );
-  if (!hasConstraints) {
+  if (resolvedVersion !== UNVERSIONED) {
+    versionRange = combinedRangeLabel;
+    resolutionSource =
+      selectionResult.resolutionSource ?? (resolutionMode === 'remote-primary' ? 'remote' : 'local');
+    logger.debug(
+      `Resolved constraints [${allRanges.join(', ')}] to '${resolvedVersion}' for package '${packageName}'`
+    );
+    if (!hasConstraints) {
+      versionRange = undefined;
+    }
+  } else {
     versionRange = undefined;
+    resolutionSource = 'local';
+    logger.debug(
+    `Resolved constraints [${allRanges.join(', ')}] to '${UNVERSIONED}' for package '${packageName}'`
+    );
   }
 
   // 3. Attempt to repair dependency from local registry
@@ -563,8 +579,8 @@ export function displayDependencyTree(resolvedPackages: ResolvedPackage[], silen
 export async function buildDependencyTree(openpackagePath: string, protectedPackages: Set<string>): Promise<Map<string, DependencyNode>> {
   const dependencyTree = new Map<string, DependencyNode>();
   
-  // Use the shared scanGroundzeroPackages function
-  const packages = await scanGroundzeroPackages(openpackagePath);
+  // Use the shared scanOpenPackagePackages function
+  const packages = await scanOpenPackagePackages(openpackagePath);
   
   // First pass: collect all packages and their dependencies
   for (const [packageName, pkg] of packages) {
@@ -582,7 +598,7 @@ export async function buildDependencyTree(openpackagePath: string, protectedPack
     
     dependencyTree.set(packageName, {
       name: packageName,
-      version: pkg.version,
+      version: formatVersionLabel(pkg.version),
       dependencies,
       dependents: new Set(),
       isProtected: protectedPackages.has(packageName)

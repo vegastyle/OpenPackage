@@ -104,12 +104,12 @@ export async function promptPackageDetails(defaultName?: string): Promise<Packag
     {
       type: 'text',
       name: 'version',
-      message: 'Version:',
+      message: 'Version (leave empty for unversioned):',
       initial: DEFAULT_VERSION,
       validate: (value: string) => {
-        if (!value) return 'Version is required';
+        if (!value) return true;
         if (!/^\d+\.\d+\.\d+/.test(value)) {
-          return 'Version should follow semantic versioning (e.g., 1.0.0)';
+          return 'Version should follow semantic versioning (e.g., 1.0.0) or be empty';
         }
         return true;
       }
@@ -139,7 +139,7 @@ export async function promptPackageDetails(defaultName?: string): Promise<Packag
 
   const config: PackageYml = {
     name: normalizePackageName(response.name),
-    version: response.version,
+    ...(response.version ? { version: response.version } : {}),
     ...(response.description && { description: response.description }),
     ...(keywordsArray.length > 0 && { keywords: keywordsArray }),
     ...(response.private && { private: response.private })
@@ -156,12 +156,12 @@ export async function promptPackageDetailsForNamed(packageName: string): Promise
     {
       type: 'text',
       name: 'version',
-      message: 'Version:',
+      message: 'Version (leave empty for unversioned):',
       initial: DEFAULT_VERSION,
       validate: (value: string) => {
-        if (!value) return 'Version is required';
+        if (!value) return true;
         if (!/^\d+\.\d+\.\d+/.test(value)) {
-          return 'Version should follow semantic versioning (e.g., 1.0.0)';
+          return 'Version should follow semantic versioning (e.g., 1.0.0) or be empty';
         }
         return true;
       }
@@ -191,7 +191,7 @@ export async function promptPackageDetailsForNamed(packageName: string): Promise
 
   const config: PackageYml = {
     name: normalizePackageName(packageName),
-    version: response.version,
+    ...(response.version ? { version: response.version } : {}),
     ...(response.description && { description: response.description }),
     ...(keywordsArray.length > 0 && { keywords: keywordsArray }),
     ...(response.private && { private: response.private })

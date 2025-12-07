@@ -13,9 +13,9 @@ import { arePackageNamesEquivalent } from '../utils/package-name.js';
 /**
  * Package metadata from openpackage directory
  */
-export interface GroundzeroPackage {
+export interface OpenPackagePackage {
   name: string;
-  version: string;
+  version?: string;
   description?: string;
   packages?: PackageDependency[];
   'dev-packages'?: PackageDependency[];
@@ -43,20 +43,20 @@ async function findPackageConfigFile(directoryPath: string): Promise<string | nu
  */
 export async function getInstalledPackageVersion(packageName: string, targetDir: string): Promise<string | null> {
   const openpackagePath = join(targetDir, DEFAULT_INSTALL_ROOT);
-  const packageGroundzeroPath = join(openpackagePath, packageName);
+  const packageOpenPackagePath = join(openpackagePath, packageName);
   
-  if (!(await exists(packageGroundzeroPath))) {
+  if (!(await exists(packageOpenPackagePath))) {
     return null;
   }
   
-  const configPath = await findPackageConfigFile(packageGroundzeroPath);
+  const configPath = await findPackageConfigFile(packageOpenPackagePath);
   if (!configPath) {
     return null;
   }
   
   try {
     const config = await parsePackageYml(configPath);
-    return config.version;
+    return config.version ?? null;
   } catch (error) {
     logger.warn(`Failed to parse package config for ${packageName}: ${error}`);
     return null;
@@ -100,8 +100,8 @@ export async function findPackageDirectory(openpackagePath: string, packageName:
 /**
  * Scan openpackage directory for all available packages
  */
-export async function scanGroundzeroPackages(openpackagePath: string): Promise<Map<string, GroundzeroPackage>> {
-  const packages = new Map<string, GroundzeroPackage>();
+export async function scanOpenPackagePackages(openpackagePath: string): Promise<Map<string, OpenPackagePackage>> {
+  const packages = new Map<string, OpenPackagePackage>();
 
   if (!(await exists(openpackagePath)) || !(await isDirectory(openpackagePath))) {
     logger.debug('Install root directory not found or not a directory', { openpackagePath });
@@ -260,7 +260,7 @@ export async function gatherRootVersionConstraints(cwd: string): Promise<Map<str
 /**
  * Get package configuration
  */
-export async function getGroundzeroPackageConfig(openpackagePath: string, packageName: string): Promise<PackageYml | null> {
+export async function getOpenPackagePackageConfig(openpackagePath: string, packageName: string): Promise<PackageYml | null> {
   const packagePath = await findPackageDirectory(openpackagePath, packageName);
   if (!packagePath) {
     return null;

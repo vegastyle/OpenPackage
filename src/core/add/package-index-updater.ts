@@ -342,7 +342,7 @@ export async function buildMappingAndWriteIndex(
     const otherIndexes = await loadOtherPackageIndexes(cwd, packageName);
 
     // Resolve version (prefer previous index; otherwise read from package.yml)
-    let version = options.versionOverride || previousIndex?.workspace?.version || '';
+    let version: string | undefined = options.versionOverride || previousIndex?.workspace?.version || undefined;
     if (!version) {
       const packageYmlPath = packageContext.packageYmlPath;
       if (await exists(packageYmlPath)) {

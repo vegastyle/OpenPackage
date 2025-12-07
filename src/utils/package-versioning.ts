@@ -4,7 +4,7 @@ import { PackageFile, PackageYml } from '../types/index.js';
 import { extractBaseVersion } from './version-generator.js';
 import { getPackageVersionPath } from '../core/directory.js';
 import { exists } from './fs.js';
-import { FILE_PATTERNS } from '../constants/index.js';
+import { FILE_PATTERNS, UNVERSIONED } from '../constants/index.js';
 import { isScopedName } from '../core/scoping/package-scoping.js';
 
 /**
@@ -87,7 +87,7 @@ export function transformPackageFilesMetadata(
   files: PackageFile[],
   sourceName: string,
   newName: string,
-  newVersion: string
+  newVersion: string | undefined
 ): PackageFile[] {
   return files.map((file) => {
     // Update package.yml
@@ -97,7 +97,7 @@ export function transformPackageFilesMetadata(
         const updated: PackageYml = {
           ...parsed,
           name: newName,
-          version: newVersion
+          ...(newVersion ? { version: newVersion } : { version: undefined })
         };
         const dumped = dumpYamlWithScopedQuoting(updated, { lineWidth: 120 });
         return { ...file, content: dumped };
@@ -105,7 +105,7 @@ export function transformPackageFilesMetadata(
         // Fallback: minimal rewrite if parsing fails
         const fallback: PackageYml = {
           name: newName,
-          version: newVersion
+          ...(newVersion ? { version: newVersion } : {})
         };
         const dumped = dumpYamlWithScopedQuoting(fallback, { lineWidth: 120 });
         return { ...file, content: dumped };
@@ -119,9 +119,23 @@ export function transformPackageFilesMetadata(
 /**
  * Check if a package version already exists
  */
-export async function packageVersionExists(packageName: string, version: string): Promise<boolean> {
-  const targetPath = getPackageVersionPath(packageName, version);
+export async function packageVersionExists(packageName: string, version?: string): Promise<boolean> {
+  const targetPath = getPackageVersionPath(packageName, version ?? UNVERSIONED);
   return await exists(targetPath);
+}
+
+/**
+ * Returns true when a version is absent or explicitly marked as unversioned.
+ */
+export function isUnversionedVersion(version?: string | null): boolean {
+  return version === undefined || version === null || version === UNVERSIONED;
+}
+
+/**
+ * Normalizes a version string for display/logging.
+ */
+export function formatVersionLabel(version?: string | null): string {
+  return isUnversionedVersion(version) ? UNVERSIONED : (version as string);
 }
 
 /**

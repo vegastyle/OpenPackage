@@ -42,7 +42,7 @@ export interface InstallPipelineResult {
   totalPackages: number;
   installed: number;
   skipped: number;
-  totalGroundzeroFiles: number;
+  totalOpenPackageFiles: number;
 }
 
 export function determineResolutionMode(
@@ -133,7 +133,7 @@ export async function runInstallPipeline(
         totalPackages: 0,
         installed: 0,
         skipped: 1,
-        totalGroundzeroFiles: 0
+        totalOpenPackageFiles: 0
       }
     };
   }
@@ -309,7 +309,7 @@ export async function runInstallPipeline(
         totalPackages: 0,
         installed: 0,
         skipped: 1,
-        totalGroundzeroFiles: 0
+        totalOpenPackageFiles: 0
       }
     };
   }
@@ -414,7 +414,7 @@ export async function runInstallPipeline(
       totalPackages: finalResolvedPackages.length,
       installed: installationOutcome.installedCount,
       skipped: installationOutcome.skippedCount,
-      totalGroundzeroFiles: installationOutcome.totalGroundzeroFiles
+      totalOpenPackageFiles: installationOutcome.totalOpenPackageFiles
     },
     warnings: warnings.length > 0 ? Array.from(new Set(warnings)) : undefined
   };

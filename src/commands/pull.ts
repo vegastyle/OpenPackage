@@ -13,6 +13,7 @@ import { PullPackageResponse } from '../types/api.js';
 import { Spinner } from '../utils/spinner.js';
 import { planRemoteDownloadsForPackage } from '../core/install/remote-flow.js';
 import { recordBatchOutcome } from '../core/install/remote-reporting.js';
+import { formatVersionLabel } from '../utils/package-versioning.js';
 
 /**
  * Fetch package metadata with spinner and error handling
@@ -196,9 +197,11 @@ async function performSinglePull(
 
     const extracted = pullResult.extracted;
 
+    const resolvedVersion = formatVersionLabel(pullResult.response.version.version);
+
     return {
       packageName: pullResult.response.package.name,
-      version: pullResult.response.version.version,
+      version: resolvedVersion,
       files: extracted.files.length,
       size: pullResult.response.version.tarballSize,
       checksum: extracted.checksum,
@@ -274,13 +277,13 @@ async function pullPackageCommand(
     const { response, context } = metadataResult;
     const registryUrl = context.registryUrl;
     const profile = context.profile;
-    const versionToPull = response.version.version;
+    const versionToPull = formatVersionLabel(response.version.version);
 
     // Display package information
     displayPackageInfo(response, parsedVersion, versionToPull, profile);
 
     // Handle version checks and overwrite confirmation (only for non-recursive pulls)
-    if (!options.recursive) {
+    if (!options.recursive && versionToPull) {
       await handleVersionChecks(parsedName, versionToPull);
     }
 

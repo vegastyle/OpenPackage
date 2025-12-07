@@ -4,7 +4,7 @@ import * as semver from 'semver';
 import { CommandResult, PackageYml, PackageDependency } from '../types/index.js';
 import { parsePackageYml } from '../utils/package-yml.js';
 import { ensureRegistryDirectories, listPackageVersions } from '../core/directory.js';
-import { GroundzeroPackage, gatherGlobalVersionConstraints, gatherRootVersionConstraints } from '../core/openpackage.js';
+import { OpenPackagePackage, gatherGlobalVersionConstraints, gatherRootVersionConstraints } from '../core/openpackage.js';
 import { resolveDependencies } from '../core/dependency-resolver.js';
 import { registryManager } from '../core/registry.js';
 import { exists } from '../utils/fs.js';
@@ -29,6 +29,7 @@ import { getPlatformDefinition, detectAllPlatforms } from '../core/platforms.js'
 import { findDirectoriesContainingFile } from '../utils/file-processing.js';
 import { discoverPackagesForStatus } from '../core/status/status-file-discovery.js';
 import { normalizePackageName } from '../utils/package-name.js';
+import { formatVersionLabel } from '../utils/package-versioning.js';
 
 /**
  * Package status types
@@ -41,7 +42,7 @@ type PackageType = 'package' | 'dev-package' | 'dependency';
  */
 interface PackageStatusInfo {
   name: string;
-  installedVersion: string;
+  installedVersion?: string;
   availableVersion?: string;
   registryVersion?: string;
   status: PackageStatus;
@@ -77,7 +78,7 @@ interface PlatformStatus {
  */
 interface ProjectStatus {
   name: string;
-  version: string;
+  version?: string;
   openpackageExists: boolean;
   packageYmlExists: boolean;
   packagesDirectoryExists: boolean;
@@ -198,7 +199,7 @@ async function checkRegistryVersions(packageName: string): Promise<{ latest?: st
  */
 async function analyzePackageStatus(
   requiredPackage: PackageDependency,
-  availablePackage: GroundzeroPackage | null,
+  availablePackage: OpenPackagePackage | null,
   localMetadata: PackageYml | null,
   type: PackageType,
   registryCheck: boolean = false
@@ -246,7 +247,7 @@ async function analyzePackageStatus(
   status.path = availablePackage.path;
 
   const requiredVersion = requiredPackage.version;
-  const installedVersion = availablePackage.version;
+  const installedVersion = formatVersionLabel(availablePackage.version);
   // Ensure displayed version reflects the actual installed/detected version
   status.installedVersion = installedVersion;
 
@@ -259,6 +260,11 @@ async function analyzePackageStatus(
     return status;
   }
   
+  if (!requiredVersion) {
+    status.status = 'installed';
+    return status;
+  }
+
   // Support multiple constraints joined by ' & ' (logical AND)
   const requiredRanges = requiredVersion.includes('&')
     ? requiredVersion.split('&').map(s => s.trim()).filter(Boolean)
@@ -271,13 +277,24 @@ async function analyzePackageStatus(
       status.status = 'installed';
       
       // Check for registry updates if requested
-      if (registryCheck && status.registryVersion && semver.gt(status.registryVersion, installedVersion)) {
+      if (
+        registryCheck &&
+        status.registryVersion &&
+        semver.valid(status.registryVersion) &&
+        semver.valid(installedVersion) &&
+        semver.gt(status.registryVersion, installedVersion)
+      ) {
         status.status = 'update-available';
         status.issues = [`Newer version ${status.registryVersion} available in registry`];
       }
     } else {
       // Determine version mismatch type
-      if (requiredRanges.length === 1 && isExactVersion(requiredRanges[0])) {
+      if (
+        requiredRanges.length === 1 &&
+        isExactVersion(requiredRanges[0]) &&
+        semver.valid(installedVersion) &&
+        semver.valid(requiredRanges[0])
+      ) {
         status.status = semver.gt(installedVersion, requiredRanges[0]) ? 'outdated' : 'dependency-mismatch';
         const comparison = semver.gt(installedVersion, requiredRanges[0]) ? 'newer than' : 'older than';
         status.issues = [`Installed version ${installedVersion} is ${comparison} required ${requiredRanges[0]}`];
@@ -294,7 +311,7 @@ async function analyzePackageStatus(
   }
   
   // Validate local metadata consistency (only flag when exact version is required)
-  if (localMetadata && localMetadata.version !== installedVersion && isExactVersion(requiredVersion)) {
+  if (localMetadata && localMetadata.version !== installedVersion && requiredVersion && isExactVersion(requiredVersion)) {
     status.issues = status.issues || [];
     status.issues.push(`Local metadata version ${localMetadata.version} differs from ai version ${installedVersion}`);
     if (status.status === 'installed') {
@@ -311,7 +328,7 @@ async function analyzePackageStatus(
 async function buildPackageDependencyTree(
   packageName: string,
   cwd: string,
-  availablePackages: Map<string, GroundzeroPackage>,
+  availablePackages: Map<string, OpenPackagePackage>,
   localMetadata: Map<string, PackageYml>,
   version?: string,
   registryCheck: boolean = false
@@ -488,14 +505,14 @@ async function performStatusAnalysis(
   ]);
 
   // Build availability map using detection results, preferring metadata versions when present
-  const availablePackages = new Map<string, GroundzeroPackage>();
+  const availablePackages = new Map<string, OpenPackagePackage>();
   for (const [name, det] of detectedByFrontmatter) {
     const meta = localMetadata.get(name);
     availablePackages.set(name, {
       name,
       version: meta?.version || '0.0.0',
       path: det.anyPath || join(aiDir, name)
-    } as GroundzeroPackage);
+    } as OpenPackagePackage);
   }
   
   // 4. Analyze all packages in parallel
@@ -658,7 +675,8 @@ function renderPackageTree(
   const statusSuffix = getStatusSuffix(pkg);
   const conflictInfo = pkg.conflictResolution ? ` [${pkg.conflictResolution}]` : '';
   
-  console.log(`${prefix}${connector}${statusIcon} ${typePrefix}${pkg.name}@${pkg.installedVersion}${statusSuffix}${conflictInfo}`);
+  const installedLabel = formatVersionLabel(pkg.installedVersion);
+  console.log(`${prefix}${connector}${statusIcon} ${typePrefix}${pkg.name}@${installedLabel}${statusSuffix}${conflictInfo}`);
   
   // Show issues if any
   if (pkg.issues?.length) {
@@ -755,7 +773,7 @@ function renderFlatView(packages: PackageStatusInfo[], options: { registry?: boo
   allPackages.forEach(pkg => {
     const values = [
       pkg.name.padEnd(widths[0]),
-      pkg.installedVersion.padEnd(widths[1]),
+      (pkg.installedVersion ?? '').padEnd(widths[1]),
       pkg.status.padEnd(widths[2]),
       pkg.type.padEnd(widths[3])
     ];

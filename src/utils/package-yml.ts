@@ -23,8 +23,8 @@ export async function parsePackageYml(packageYmlPath: string): Promise<PackageYm
     const parsed = yaml.load(content) as PackageYml;
     
     // Validate required fields
-    if (!parsed.name || !parsed.version) {
-      throw new Error('package.yml must contain name and version fields');
+    if (!parsed.name) {
+      throw new Error('package.yml must contain a name field');
     }
 
     const includeFilters = normalizeStringArray(parsed.include);
