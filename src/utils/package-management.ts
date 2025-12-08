@@ -185,9 +185,10 @@ export async function addPackageToYml(
       ? config[currentLocation]![existingIndex]?.version
       : undefined;
 
-  let versionToWrite: string | undefined = originalVersion;
+  const shouldOmitVersion = isUnversionedVersion(packageVersion) || isUnversionedVersion(originalVersion);
+  let versionToWrite: string | undefined = shouldOmitVersion ? undefined : originalVersion;
 
-  if (packageVersion && !isUnversionedVersion(packageVersion)) {
+  if (!shouldOmitVersion && packageVersion) {
     const baseVersion = extractBaseVersion(packageVersion);
     const defaultRange = createCaretRange(baseVersion);
     versionToWrite = originalVersion ?? defaultRange;

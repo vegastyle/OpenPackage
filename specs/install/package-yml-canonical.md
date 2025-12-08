@@ -50,6 +50,7 @@ The aim is to make behavior predictable and avoid “CLI overrides” that silen
       - If only WIP/pre-release exists, the policy may:
         - Use an **exact WIP version** in `package.yml`, or
         - Use a range that explicitly includes that pre-release.
+      - If the selected version is **unversioned** (manifest omits `version`, represented as `0.0.0` internally), persist the dependency entry **without a `version` field** (bare name), rather than writing `0.0.0`.
 
 - **Case B – `opkg install <name>@<spec>`**:
   - `<spec>` is treated as the **initial canonical range** for `<name>`.

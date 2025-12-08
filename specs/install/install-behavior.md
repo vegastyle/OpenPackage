@@ -73,6 +73,7 @@ Other flags (`--dev`, `--remote`, `--platforms`, `--dry-run`, `--stable`, confli
     - **Install `<name>@<selectedVersion>`**.
     - **Add to `package.yml`**:
       - Default range is **caret based on the stable base** of the selected version (e.g. `^1.0.1` for `1.0.1-000fz8.a3k`), unless later overridden by a global policy.
+      - When the selected version is **unversioned** (manifest omits `version`, represented internally as `0.0.0`), persist the entry **without a `version` field** in `packages` / `dev-packages` (do **not** write `0.0.0`).
 
   - **Case B – `opkg install <name>@<spec>`**:
     - Treat `<spec>` as the **initial canonical range**:
