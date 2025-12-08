@@ -25,6 +25,9 @@ import {
   type PackageContext 
 } from '../package-context.js';
 import { applyWorkspacePackageRename } from './workspace-rename.js';
+import { runSingleFileSave } from './save-single-file.js';
+import { resolve } from 'path';
+import { exists } from '../../utils/fs.js';
 
 export type { SaveMode } from './name-resolution.js';
 
@@ -43,10 +46,18 @@ export interface SavePipelineResult {
 export async function runSavePipeline(
   packageName: string | undefined,
   options: SavePipelineOptions
-): Promise<CommandResult<SavePipelineResult>> {
+): Promise<CommandResult<SavePipelineResult | { packageFiles: PackageFile[] }>> {
   const cwd = process.cwd();
   const { mode, force, rename } = options;
   const { op, opCap } = MODE_LABELS[mode];
+
+  // Single-file save mode: treat a path argument as a request to save into f@0.0.0
+  if (packageName) {
+    const candidatePath = resolve(cwd, packageName);
+    if (await exists(candidatePath)) {
+      return runSingleFileSave(candidatePath, { dev: false });
+    }
+  }
 
   // Use unified detection
   const detectedContext = await detectPackageContext(cwd, packageName);
