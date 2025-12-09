@@ -3,6 +3,7 @@ import { Command } from 'commander';
 import type { CommandResult, PushOptions } from '../types/index.js';
 import { withErrorHandling } from '../utils/errors.js';
 import { runPushPipeline } from '../core/push/push-pipeline.js';
+import { parsePathsOption } from '../utils/registry-paths.js';
 
 async function pushPackageCommand(
   packageInput: string,
@@ -18,6 +19,7 @@ export function setupPushCommand(program: Command): void {
     .argument('<package-name>', 'name of the package to push. Supports package@version syntax.')
     .option('--profile <profile>', 'profile to use for authentication')
     .option('--api-key <key>', 'API key for authentication (overrides profile)')
+    .option('--paths <list>', 'comma-separated registry paths for partial push', parsePathsOption)
     .action(withErrorHandling(async (packageName: string, options: PushOptions) => {
       const result = await pushPackageCommand(packageName, options);
       if (!result.success) {

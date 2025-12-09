@@ -161,6 +161,7 @@ export interface UninstallOptions {
 export interface PushOptions {
   profile?: string;
   apiKey?: string;
+  paths?: string[];
 }
 
 export interface PullOptions {

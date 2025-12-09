@@ -23,13 +23,15 @@ This document focuses on user-facing behavior:
 - **Package syntax**:
   - `<name>` – package name, optionally unscoped.
   - `<name>@<version>` – optional explicit version.
-  - `<path/to/file>` – if the argument is a file path, push is treated as a **single-file push** targeting the local `f` package (see below).
+  - `<name@version>/<registry-path>` – partial push of specific registry paths.
+  - `--paths <list>` – comma-separated registry paths for partial push.
 
 Examples:
 - `opkg push my-pack`
 - `opkg push @scope/my-pack`
 - `opkg push my-pack@1.2.3`
-- `opkg push ./notes/readme.md` (single-file push to `@scope/f`, tarball contains only that file + `.openpackage/package.yml`)
+- `opkg push @scope/my-pack/specs/readme.md` (partial push of a single file)
+- `opkg push @scope/my-pack@1.2.3 --paths specs/readme.md,specs/guide.md`
 
 ---
 
@@ -97,23 +99,23 @@ High-level flow:
 
 ---
 
-## Single-file push behavior (`f` package)
+## Partial push behavior (paths)
 
-When the argument is a **file path** (and the file exists), `push` enters single-file mode:
-
-1. The CLI resolves the local single-file package `f`:
-   - Looks for `f` across scoped variants in the local registry (e.g. `@user/f`, `@team/f`).
-   - If multiple matches exist, prompts to select which scoped `f` to use.
-   - If none exist, fails with guidance to run `opkg save <file>` first.
-2. Version selection follows the normal rules (typically `0.0.0` for `f` unless a semver is present).
-3. Tarball contents are **narrowed** to exactly:
-   - The target file (registry path for that file).
-   - `.openpackage/package.yml`.
-   Other files in the local `f` cache are excluded from the tarball.
-4. Upload uses the standard `/packages/push` endpoint; the backend merges the single-file payload into the existing `@scope/f` version (overwrite wins for the uploaded file, other files are preserved).
+- Partial pushes upload only specific registry paths from an existing local package version.
+- Paths can be provided via:
+  - `<pkg[@ver]>/<registry-path>`
+  - `--paths specs/readme.md,specs/guide.md`
+- Behavior:
+  1. Scope resolution and version selection run first (explicit or latest-stable).
+  2. Requested paths are normalized and validated against the local package files.
+     - Missing paths fail the push with a clear missing-path message.
+  3. Tarball is narrowed to:
+     - The requested file set.
+     - `.openpackage/package.yml`.
+  4. Upload uses the standard `/packages/push` endpoint.
 
 Notes:
-- If the target file is missing from the local `f` package, the CLI fails fast with “File not found in local registry.”
+- This replaces the previous single-file `f` flow; single-file pushes are just partial pushes with one path.
 - Manifest is required; if `.openpackage/package.yml` is missing locally, the CLI errors.
 
 

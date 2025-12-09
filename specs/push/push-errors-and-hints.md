@@ -79,6 +79,16 @@ The following behavior is preserved from the broader CLI error-handling design, 
   - The command returns an error result:
     - `error: "Version not found"`.
 
+### Requested path not found (partial push)
+
+- Condition:
+  - User requests a partial push (via `--paths` or `<pkg@ver>/<registry-path>`) and one or more paths are missing locally.
+- Behavior:
+  - The CLI prints, for each missing path:
+    - `❌ Path '<path>' not found in local registry for '<pkg>@<version>'`
+  - The command returns an error result:
+    - `error: "Requested path not found in local registry"`.
+
 ### Explicit prerelease version
 
 - Condition:

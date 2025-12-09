@@ -128,6 +128,18 @@ export function parsePackageInstallSpec(
 }
 
 /**
+ * Parse a push spec that may include a registry-relative path (same format as install):
+ *   - name/path
+ *   - name@version/path
+ * Returns { name, version?, registryPath? }
+ */
+export function parsePackagePushSpec(
+  raw: string
+): { name: string; version?: string; registryPath?: string } {
+  return parsePackageInstallSpec(raw);
+}
+
+/**
  * Normalize a package name to lowercase, handling scoped names properly.
  * Scoped names like @Scope/Name become @scope/name.
  * Regular names like MyPackage become mypackage.
