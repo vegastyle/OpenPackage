@@ -96,7 +96,7 @@ export async function runPushPipeline(
 
   let packageNameToPush = parsedName;
   let attemptedVersion: string | undefined;
-  const targetRegistryPath = singleFileContext?.kind === 'ok'
+  let targetRegistryPath = singleFileContext?.kind === 'ok'
     ? singleFileContext.registryPath
     : undefined;
 
@@ -111,6 +111,12 @@ export async function runPushPipeline(
 
     await authManager.validateAuth(authOptions);
     packageNameToPush = await ensureScopedPackageName(cwd, packageNameToPush, authOptions);
+
+    // For single-file pushes, strip a leading "<packageName>/" prefix from the
+    // registry path if the user supplied it (e.g. "@scope/f/path/to/file.md").
+    if (singleFileContext && targetRegistryPath) {
+      targetRegistryPath = stripPackagePrefix(targetRegistryPath, packageNameToPush);
+    }
 
     const { pkg, versionToPush } = await resolvePushResolution(packageNameToPush, parsedVersion);
     attemptedVersion = versionToPush;
@@ -513,5 +519,14 @@ function buildSingleFileTarballPackage(
     metadata: pkg.metadata,
     files: [target, manifest],
   }
+}
+
+function stripPackagePrefix(registryPath: string, packageName: string): string {
+  const normalizedPath = normalizePathForProcessing(registryPath);
+  const normalizedPrefix = normalizePathForProcessing(`${packageName}/`);
+  if (normalizedPath.startsWith(normalizedPrefix)) {
+    return normalizedPath.slice(normalizedPrefix.length);
+  }
+  return normalizedPath;
 }
 
