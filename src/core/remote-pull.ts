@@ -542,7 +542,22 @@ async function getRemotePackage(
 }
 
 async function downloadPackageTarball(httpClient: HttpClient, downloadUrl: string): Promise<Buffer> {
-  const buffer = await httpClient.downloadFile(downloadUrl);
+  const downloadHost = (() => {
+    try {
+      return new URL(downloadUrl).host;
+    } catch {
+      return '';
+    }
+  })();
+  const registryHost = (() => {
+    try {
+      return new URL(authManager.getRegistryUrl()).host;
+    } catch {
+      return '';
+    }
+  })();
+  const shouldSkipAuth = downloadHost !== '' && registryHost !== '' && downloadHost !== registryHost;
+  const buffer = await httpClient.downloadFile(downloadUrl, { skipAuth: shouldSkipAuth });
   return Buffer.from(buffer);
 }
 

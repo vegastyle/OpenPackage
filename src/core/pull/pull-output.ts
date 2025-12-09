@@ -1,6 +1,24 @@
 import { PullPackageResponse } from '../../types/api.js';
 import { formatFileSize } from '../../utils/formatters.js';
+import { formatVersionLabel } from '../../utils/package-versioning.js';
 import { PullPipelineResult } from './pull-types.js';
+
+const UNVERSIONED_LABEL = 'unversioned';
+
+function hasDefinedManifestVersion(response: PullPackageResponse): boolean {
+  const manifestVersion = response.version.version;
+  return manifestVersion !== undefined && manifestVersion !== null;
+}
+
+function getResolvedVersionLabel(
+  response: PullPackageResponse,
+  versionToPull: string
+): string {
+  if (!hasDefinedManifestVersion(response)) {
+    return UNVERSIONED_LABEL;
+  }
+  return versionToPull;
+}
 
 export function displayPackageInfo(
   response: PullPackageResponse,
@@ -18,7 +36,8 @@ export function displayPackageInfo(
   }
 
   console.log('✓ Package found in registry');
-  console.log(`✓ Version: ${parsedVersion ?? 'latest'} (resolved: ${versionToPull})`);
+  const resolvedVersionLabel = getResolvedVersionLabel(response, versionToPull);
+  console.log(`✓ Version: ${parsedVersion ?? 'latest'} (resolved: ${resolvedVersionLabel})`);
   console.log(`✓ Profile: ${profile}`);
   console.log('');
 }
@@ -31,7 +50,10 @@ export function displayPullResults(
   console.log('');
   console.log('✓ Package Details:');
   console.log(`  • Name: ${result.packageName}`);
-  console.log(`  • Version: ${result.version}`);
+  const manifestVersion = response.version.version;
+  if (hasDefinedManifestVersion(response) && manifestVersion) {
+    console.log(`  • Version: ${formatVersionLabel(manifestVersion)}`);
+  }
   console.log(`  • Description: ${response.package.description || '(no description)'}`);
   console.log(`  • Size: ${formatFileSize(result.size)}`);
   const keywords = Array.isArray(response.package.keywords) ? response.package.keywords : [];
