@@ -1,6 +1,6 @@
 {
   "name": "opkg",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "publishConfig": {
     "access": "public"
   },
@@ -40,13 +40,14 @@
     "dev:watch": "nodemon --exec ts-node src/index.ts",
     "clean": "rm -rf dist",
     "prepublishOnly": "npm run build",
-    "test": "node --loader ts-node/esm tests/save-pack-versioning.test.ts && node --loader ts-node/esm tests/install-cli-modes.test.ts && node --loader ts-node/esm tests/install-selection.test.js && node --loader ts-node/esm tests/version-selection.test.ts && node --loader ts-node/esm tests/push-stable-selection.test.ts"
+    "test": "TS_NODE_TRANSPILE_ONLY=1 node --loader ts-node/esm tests/save-pack-versioning.test.ts && TS_NODE_TRANSPILE_ONLY=1 node --loader ts-node/esm tests/install-cli-modes.test.ts && TS_NODE_TRANSPILE_ONLY=1 node --loader ts-node/esm tests/install-selection.test.ts && TS_NODE_TRANSPILE_ONLY=1 node --loader ts-node/esm tests/version-selection.test.ts && TS_NODE_TRANSPILE_ONLY=1 node --loader ts-node/esm tests/push-stable-selection.test.ts && TS_NODE_TRANSPILE_ONLY=1 node --loader ts-node/esm tests/workspace-paths.test.ts && TS_NODE_TRANSPILE_ONLY=1 node --loader ts-node/esm tests/platform-extension-filter.test.ts && TS_NODE_TRANSPILE_ONLY=1 node --loader ts-node/esm tests/package-filters.test.ts"
   },
   "dependencies": {
     "commander": "^14.0.0",
     "gray-matter": "^4.0.3",
     "hash-wasm": "^4.12.0",
     "js-yaml": "^4.1.0",
+    "jsonc-parser": "^3.3.1",
     "junk": "^4.0.1",
     "nanoid": "^5.0.7",
     "prompts": "^2.4.2",

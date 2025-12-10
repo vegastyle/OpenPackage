@@ -1,4 +1,4 @@
-import type { Platform } from '../../constants/index.js';
+import type { Platform } from '../platforms.js';
 
 export type SaveCandidateSource = 'local' | 'workspace';
 
@@ -27,4 +27,10 @@ export interface SaveCandidate {
   /** Tracks whether the candidate originates from a markdown file */
   isMarkdown?: boolean;
 }
+
+export interface SaveConflictResolution {
+  selection: SaveCandidate;
+  platformSpecific: SaveCandidate[];
+}
+
 

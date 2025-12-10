@@ -4,10 +4,13 @@
  * into universal markdown content.
  */
 
-import { FILE_PATTERNS, PLATFORMS, UNIVERSAL_SUBDIRS, type Platform } from '../constants/index.js';
+import { DIR_PATTERNS, FILE_PATTERNS, UNIVERSAL_SUBDIRS } from '../constants/index.js';
 import type { PackageFile } from '../types/index.js';
 import { packageManager } from '../core/package.js';
 import * as yaml from 'js-yaml';
+import { getAllPlatforms, type Platform } from '../core/platforms.js';
+
+const OPENPACKAGE_PREFIX = `${DIR_PATTERNS.OPENPACKAGE}/`;
 
 function isPlainObject(value: unknown): value is Record<string, any> {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
@@ -95,7 +98,7 @@ function formatWithFrontmatter(data: Record<string, any>, body: string): string 
  * Merge platform-specific YAML override with universal content.
  *
  * - Only acts on markdown files (relPath must end with .md)
- * - Looks for `{universalSubdir}/{base}.{platform}.yml` in the provided files
+ * - Looks for `.openpackage/{universalSubdir}/{base}.{platform}.yml` in the provided files
  * - If found, merges YAML (non-package) before the package block
  * - Returns original content if no matching override
  */
@@ -110,7 +113,8 @@ export function mergePlatformYamlOverride(
     if (!relPath.endsWith(FILE_PATTERNS.MD_FILES)) return universalContent;
 
     const base = relPath.slice(0, -FILE_PATTERNS.MD_FILES.length);
-    const overridePath = `${universalSubdir}/${base}.${targetPlatform}.yml`;
+    // Canonical override path: .openpackage/<subdir>/<base>.<platform>.yml
+    const overridePath = `${OPENPACKAGE_PREFIX}${universalSubdir}/${base}.${targetPlatform}.yml`;
     const matchingYml = packageFiles.find(f => f.path === overridePath);
 
     if (!matchingYml?.content?.trim()) {
@@ -150,7 +154,7 @@ export function mergePlatformYamlOverride(
 
 /**
  * Load platform-specific YAML override files from the registry for a package version.
- * Matches files in universal subdirs with pattern: "{subdir}/{base}.{platform}.yml"
+ * Matches files in universal subdirs with pattern: ".openpackage/{subdir}/{base}.{platform}.yml"
  */
 export async function loadRegistryYamlOverrides(
   packageName: string,
@@ -162,13 +166,19 @@ export async function loadRegistryYamlOverrides(
   const pkg = await packageManager.loadPackage(packageName, version);
 
   // Known platforms for suffix matching
-  const platformValues: string[] = Object.values(PLATFORMS as Record<string, string>);
+  const platformValues: string[] = getAllPlatforms({ includeDisabled: true });
   const subdirs: string[] = Object.values(UNIVERSAL_SUBDIRS as Record<string, string>);
 
   for (const file of pkg.files) {
     const path = file.path;
+    
+    // Must be under .openpackage/<subdir>/ (canonical layout)
+    if (!path.startsWith(OPENPACKAGE_PREFIX)) continue;
+    
+    const afterPrefix = path.slice(OPENPACKAGE_PREFIX.length);
     // Must be in a universal subdir
-    if (!subdirs.some(sd => path.startsWith(sd + '/'))) continue;
+    if (!subdirs.some(sd => afterPrefix.startsWith(sd + '/'))) continue;
+    
     // Must end with .yml and have a platform suffix before it
     if (!path.endsWith(FILE_PATTERNS.YML_FILE)) continue;
 

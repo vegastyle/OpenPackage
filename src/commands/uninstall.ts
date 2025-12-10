@@ -1,5 +1,5 @@
 import { Command } from 'commander';
-import { join, relative, dirname, resolve } from 'path';
+import { join, relative, dirname } from 'path';
 import { readdir } from 'fs/promises';
 import { UninstallOptions, CommandResult } from '../types/index.js';
 import { parsePackageYml, writePackageYml } from '../utils/package-yml.js';
@@ -14,7 +14,7 @@ import {
   FILE_PATTERNS,
   DEPENDENCY_ARRAYS,
 } from '../constants/index.js';
-import { getLocalPackageYmlPath, getAIDir, getLocalPackagesDir, getLocalPackageDir } from '../utils/paths.js';
+import { getLocalPackageYmlPath, getInstallRootDir, getLocalPackagesDir, getLocalPackageDir } from '../utils/paths.js';
 import { computeRootFileRemovalPlan, applyRootFileRemovals } from '../utils/root-file-uninstaller.js';
 import { normalizePathForProcessing } from '../utils/path-normalization.js';
 import { getAllPlatformDirs } from '../utils/platform-utils.js';
@@ -283,12 +283,12 @@ async function uninstallPackageCommand(
   
   // Ensure registry directories exist
   await ensureRegistryDirectories();
-
-  const cwd = options.workingDir ? resolve(process.cwd(), options.workingDir) : process.cwd();
-  const aiRootPath = getAIDir(cwd);
+  
+  const cwd = process.cwd();
+  const installRootPath = getInstallRootDir(cwd);
   const openpackagePath = targetDir && targetDir !== '.'
-    ? join(aiRootPath, targetDir.startsWith('/') ? targetDir.slice(1) : targetDir)
-    : aiRootPath;
+    ? join(installRootPath, targetDir.startsWith('/') ? targetDir.slice(1) : targetDir)
+    : installRootPath;
   
 
   // Helper now available in fs utils: removeEmptyDirectories
@@ -362,7 +362,7 @@ async function uninstallPackageCommand(
       await removeEmptyDirectories(openpackagePath);
     }
 
-    // Discover platform-specific files BEFORE removing package directories (to access package.index.yml files)
+    // Discover platform-specific files BEFORE removing package directories (to access package index files)
     const discoveredByPackage = await Promise.all(
       packagesToRemove.map(async (name) => ({ name, files: await discoverPackageFilesForUninstall(name) }))
     );
@@ -520,10 +520,7 @@ export function setupUninstallCommand(program: Command): void {
     .argument('[target-dir]', 'target directory (defaults to current directory)', '.')
     .option('--dry-run', 'preview changes without applying them')
     .option('--recursive', 'recursively remove dangling dependencies (packages not depended upon by any remaining packages, excluding those listed in cwd package.yml)')
-    .option('--working-dir <path>', 'override working directory')
-    .action(withErrorHandling(async (packageName: string, targetDir: string, options: UninstallOptions, command) => {
-      const parentOpts = command.parent?.opts() || {};
-      options = { ...parentOpts, ...options };
+    .action(withErrorHandling(async (packageName: string, targetDir: string, options: UninstallOptions) => {
       const result = await uninstallPackageCommand(packageName, targetDir, options);
       if (!result.success && result.error !== 'Package not found') {
         throw new Error(result.error || 'Uninstall operation failed');

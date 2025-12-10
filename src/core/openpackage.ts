@@ -3,7 +3,8 @@ import { PackageYml, PackageDependency } from '../types/index.js';
 import { parsePackageYml } from '../utils/package-yml.js';
 import { exists, isDirectory, listDirectories } from '../utils/fs.js';
 import { logger } from '../utils/logger.js';
-import { FILE_PATTERNS, PLATFORM_DIRS } from '../constants/index.js';
+import { FILE_PATTERNS } from '../constants/index.js';
+import { DEFAULT_INSTALL_ROOT } from '../constants/workspace.js';
 import { getLocalPackageYmlPath, getLocalPackagesDir } from '../utils/paths.js';
 import { findFilesByExtension, findDirectoriesContainingFile } from '../utils/file-processing.js';
 import { getDetectedPlatforms, getPlatformDefinition, type Platform } from './platforms.js';
@@ -41,7 +42,7 @@ async function findPackageConfigFile(directoryPath: string): Promise<string | nu
  * Get the version of an installed package by package name
  */
 export async function getInstalledPackageVersion(packageName: string, targetDir: string): Promise<string | null> {
-  const openpackagePath = join(targetDir, PLATFORM_DIRS.AI);
+  const openpackagePath = join(targetDir, DEFAULT_INSTALL_ROOT);
   const packageGroundzeroPath = join(openpackagePath, packageName);
   
   if (!(await exists(packageGroundzeroPath))) {
@@ -103,7 +104,7 @@ export async function scanGroundzeroPackages(openpackagePath: string): Promise<M
   const packages = new Map<string, GroundzeroPackage>();
 
   if (!(await exists(openpackagePath)) || !(await isDirectory(openpackagePath))) {
-    logger.debug('AI directory not found or not a directory', { openpackagePath });
+    logger.debug('Install root directory not found or not a directory', { openpackagePath });
     return packages;
   }
 
@@ -286,13 +287,13 @@ export async function checkExistingPackageInMarkdownFiles(
   packageName: string
 ): Promise<{ found: boolean; version?: string; location?: string }> {
   // Build search targets: ai directory + all detected platform subdirectories
-  const targets: Array<{ dir: string; exts: string[]; label: string }> = [];
+  const targets: Array<{ dir: string; exts?: string[]; label: string }> = [];
 
-  // Always include AI directory
+  // Always include workspace install root
   targets.push({
-    dir: join(cwd, PLATFORM_DIRS.AI),
+    dir: join(cwd, DEFAULT_INSTALL_ROOT),
     exts: [FILE_PATTERNS.MD_FILES],
-    label: PLATFORM_DIRS.AI
+    label: DEFAULT_INSTALL_ROOT
   });
 
   // Add detected platforms' subdirectories (rules/commands/agents, etc.)
@@ -302,7 +303,10 @@ export async function checkExistingPackageInMarkdownFiles(
       const def = getPlatformDefinition(platform as Platform);
       for (const [_, subdirDef] of Object.entries(def.subdirs)) {
         const dirPath = join(cwd, def.rootDir, subdirDef.path);
-        targets.push({ dir: dirPath, exts: subdirDef.readExts, label: def.id });
+        if (subdirDef.exts && subdirDef.exts.length === 0) {
+          continue;
+        }
+        targets.push({ dir: dirPath, exts: subdirDef.exts, label: def.id });
       }
     }
   } catch (error) {
@@ -313,8 +317,13 @@ export async function checkExistingPackageInMarkdownFiles(
 
   // Search each target directory for files with supported extensions
   for (const target of targets) {
+    const extensions = target.exts;
+    if (extensions && extensions.length === 0) {
+      continue;
+    }
+
     try {
-      const files = await findFilesByExtension(target.dir, target.exts);
+      const files = await findFilesByExtension(target.dir, extensions ?? []);
       for (const file of files) {
         // Frontmatter support removed - cannot determine package ownership
       }

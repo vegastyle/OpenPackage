@@ -4,9 +4,15 @@
  */
 
 import { basename } from 'path';
-import { getPlatformDefinition, isPlatformId } from '../core/platforms.js';
-import { FILE_PATTERNS, UNIVERSAL_SUBDIRS, PLATFORMS, PLATFORM_DIRS, type UniversalSubdir, type Platform } from '../constants/index.js';
-import { getFirstPathComponent, parsePathWithPrefix } from './path-normalization.js';
+import {
+  getPlatformDefinition,
+  getAllPlatforms,
+  isPlatformId,
+  getWorkspaceExt,
+  type Platform
+} from '../core/platforms.js';
+import { DIR_PATTERNS, FILE_PATTERNS, UNIVERSAL_SUBDIRS, type UniversalSubdir } from '../constants/index.js';
+import { getFirstPathComponent, parsePathWithPrefix, normalizePathForProcessing } from './path-normalization.js';
 
 /**
  * Parse a registry or universal path to extract subdir and relative path info
@@ -21,10 +27,14 @@ export function parseUniversalPath(
 ): { universalSubdir: UniversalSubdir; relPath: string; platformSuffix?: string } | null {
   // Check if path starts with universal subdirs
   const universalSubdirs = Object.values(UNIVERSAL_SUBDIRS) as UniversalSubdir[];
-  const knownPlatforms = Object.values(PLATFORMS) as readonly Platform[];
+  const knownPlatforms = getAllPlatforms({ includeDisabled: true }) as readonly Platform[];
+  const normalized = normalizePathForProcessing(path);
+  const withoutPrefix = normalized.startsWith(`${DIR_PATTERNS.OPENPACKAGE}/`)
+    ? normalized.slice(DIR_PATTERNS.OPENPACKAGE.length + 1)
+    : normalized;
 
   for (const subdir of universalSubdirs) {
-    const parsed = parsePathWithPrefix(path, subdir);
+    const parsed = parsePathWithPrefix(withoutPrefix, subdir);
     if (parsed) {
       const remainingPath = parsed.remaining;
       let platformSuffix: string | undefined;
@@ -72,58 +82,6 @@ export function parseUniversalPath(
     }
   }
 
-  // Check if path starts with ai/ followed by universal subdirs (for AI directory files)
-  const aiParsed = parsePathWithPrefix(path, PLATFORM_DIRS.AI);
-  if (aiParsed) {
-    const aiPath = aiParsed.remaining;
-
-    for (const subdir of universalSubdirs) {
-      const subdirParsed = parsePathWithPrefix(aiPath, subdir);
-      if (subdirParsed) {
-        const remainingPath = subdirParsed.remaining;
-        let platformSuffix: string | undefined;
-        let normalizedRelPath = remainingPath;
-
-        // Platform suffix detection is always enabled
-        if (options.allowPlatformSuffix !== false) {
-          // Check for directory-level platform suffix
-          const segments = remainingPath.split('/');
-          for (let i = 0; i < segments.length - 1; i++) {
-            const segment = segments[i];
-            for (const platform of knownPlatforms) {
-              if (segment.endsWith(`.${platform}`) && isPlatformId(platform)) {
-                platformSuffix = platform;
-                segments[i] = segment.slice(0, -platform.length - 1);
-                normalizedRelPath = segments.join('/');
-                break;
-              }
-            }
-            if (platformSuffix) break;
-          }
-
-          // Check for file-level platform suffix if not already found
-          if (!platformSuffix) {
-            const parts = remainingPath.split('.');
-            if (parts.length >= 3 && parts[parts.length - 1] === 'md') {
-              const possiblePlatformSuffix = parts[parts.length - 2];
-              if (isPlatformId(possiblePlatformSuffix)) {
-                platformSuffix = possiblePlatformSuffix;
-                const baseName = parts.slice(0, -2).join('.');
-                normalizedRelPath = baseName + FILE_PATTERNS.MD_FILES;
-              }
-            }
-          }
-        }
-
-        return {
-          universalSubdir: subdir,
-          relPath: normalizedRelPath,
-          platformSuffix
-        };
-      }
-    }
-  }
-
   return null;
 }
 
@@ -146,14 +104,16 @@ export function getPlatformSpecificFilename(universalPath: string, platform: Pla
     return registryFileName;
   }
 
-  // Get the base name without extension
-  const baseName = registryFileName.replace(/\.[^.]+$/, '');
+  const extensionMatch = registryFileName.match(/\.[^.]+$/);
+  const packageExt = extensionMatch?.[0] ?? '';
 
-  // Apply platform-specific write extension, or preserve original if undefined
-  if (subdirDef.writeExt === undefined) {
-    return registryFileName; // Preserve original extension
+  if (!packageExt) {
+    return registryFileName;
   }
-  return baseName + subdirDef.writeExt;
+
+  const baseName = registryFileName.slice(0, -packageExt.length);
+  const workspaceExt = getWorkspaceExt(subdirDef, packageExt);
+  return baseName + workspaceExt;
 }
 
 /**

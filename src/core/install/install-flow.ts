@@ -2,18 +2,16 @@ import * as semver from 'semver';
 import { InstallOptions } from '../../types/index.js';
 import { ResolvedPackage } from '../dependency-resolver.js';
 import { ensureRegistryDirectories } from '../directory.js';
-import { createPlatformDirectories } from '../platforms.js';
+import { createPlatformDirectories, type Platform } from '../platforms.js';
 import { gatherGlobalVersionConstraints, gatherRootVersionConstraints } from '../openpackage.js';
 import { resolveDependencies } from '../dependency-resolver.js';
 import { PackageRemoteResolutionOutcome } from './types.js';
 import { logger } from '../../utils/logger.js';
 import { VersionConflictError, UserCancellationError } from '../../utils/errors.js';
-import type { Platform } from '../../constants/index.js';
 import { normalizePlatforms } from '../../utils/platform-mapper.js';
-import { createBasicPackageYml } from '../../utils/package-management.js';
+import { createWorkspacePackageYml } from '../../utils/package-management.js';
 import { checkAndHandleAllPackageConflicts } from '../../utils/install-conflict-handler.js';
 import { discoverAndCategorizeFiles } from '../../utils/install-file-discovery.js';
-import { installAiFilesFromList } from '../../utils/install-orchestrator.js';
 import { installRootFilesFromMap } from '../../utils/root-file-installer.js';
 import { installPackageByIndex, type IndexInstallResult } from '../../utils/index-based-installer.js';
 import { promptVersionSelection } from '../../utils/prompts.js';
@@ -77,7 +75,7 @@ export async function prepareInstallEnvironment(
   options: InstallOptions
 ): Promise<{ specifiedPlatforms: string[] | undefined }> {
   await ensureRegistryDirectories();
-  await createBasicPackageYml(cwd);
+  await createWorkspacePackageYml(cwd);
 
   const specifiedPlatforms = normalizePlatforms(options.platforms);
 
@@ -281,10 +279,6 @@ export async function performIndexBasedInstallationPhases(params: InstallationPh
 // Helper functions
 function formatPackageLabel(packageName: string, version?: string): string {
   return version ? `${packageName}@${version}` : packageName;
-}
-
-function getAIDir(cwd: string): string {
-  return `${cwd}/ai`;
 }
 
 // Import the resolvePlatforms function from the platform-resolution file

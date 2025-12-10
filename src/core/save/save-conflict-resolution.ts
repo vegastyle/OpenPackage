@@ -1,50 +1,48 @@
 import { dirname, join } from 'path';
 import type { PackageFile } from '../../types/index.js';
-import type { PackageYmlInfo } from './package-yml-generator.js';
+import type { PackageContext } from '../package-context.js';
 import { FILE_PATTERNS } from '../../constants/index.js';
-import { PACKAGE_INDEX_FILENAME, readPackageIndex, isDirKey } from '../../utils/package-index-yml.js';
-import { getLocalPackageDir } from '../../utils/paths.js';
-import { ensureDir, exists, isDirectory, readTextFile, writeTextFile } from '../../utils/fs.js';
-import { findFilesByExtension, getFileMtime } from '../../utils/file-processing.js';
-import { calculateFileHash } from '../../utils/hash-utils.js';
+import { readPackageIndex, isDirKey } from '../../utils/package-index-yml.js';
+import { ensureDir, exists, isDirectory, readTextFile, writeTextFile, remove } from '../../utils/fs.js';
 import {
-  isAllowedRegistryPath,
   normalizeRegistryPath,
-  isRootRegistryPath,
-  isSkippableRegistryPath
 } from '../../utils/registry-entry-filter.js';
-import { discoverPlatformFilesUnified } from '../discovery/platform-files-discovery.js';
-import { getRelativePathFromBase } from '../../utils/path-normalization.js';
 import { UTF8_ENCODING } from './constants.js';
-import { safePrompts, promptPlatformSpecificSelection, getContentPreview } from '../../utils/prompts.js';
 import { createPlatformSpecificRegistryPath } from '../../utils/platform-specific-paths.js';
 import { logger } from '../../utils/logger.js';
-import { SaveCandidate } from './save-candidate-types.js';
-import type { SaveConflictResolution } from './save-conflict-types.js';
+import { SaveCandidate } from './save-types.js';
 import {
   discoverWorkspaceRootSaveCandidates,
   loadLocalRootSaveCandidates
 } from './root-save-candidates.js';
-import { splitFrontmatter, stripFrontmatter } from '../../utils/markdown-frontmatter.js';
 import {
   buildFrontmatterMergePlans,
   applyFrontmatterMergePlans,
-  type SaveCandidateGroup
+  getOverrideRelativePath,
 } from './save-yml-resolution.js';
-import { inferPlatformFromWorkspaceFile } from '../platforms.js';
+import { loadLocalCandidates, discoverWorkspaceCandidates } from './save-candidate-loader.js';
+import {
+  buildCandidateGroups,
+  pruneWorkspaceCandidatesWithLocalPlatformVariants,
+  resolveGroup,
+  resolveRootGroup
+} from './save-conflict-resolver.js';
+import { readPackageFilesForRegistry } from '../../utils/package-copy.js';
+import { composeMarkdown } from '../../utils/markdown-frontmatter.js';
 
 export interface SaveConflictResolutionOptions {
   force?: boolean;
 }
 
 export async function resolvePackageFilesWithConflicts(
-  cwd: string,
-  packageInfo: PackageYmlInfo,
+  packageContext: PackageContext,
   options: SaveConflictResolutionOptions = {}
 ): Promise<PackageFile[]> {
-  const packageDir = getLocalPackageDir(cwd, packageInfo.config.name);
+  const cwd = process.cwd();
+  const packageFilesDir = packageContext.packageFilesDir;
+  const packageRootDir = packageContext.packageRootDir;
 
-  if (!(await exists(packageDir)) || !(await isDirectory(packageDir))) {
+  if (!(await exists(packageFilesDir)) || !(await isDirectory(packageFilesDir))) {
     return [];
   }
 
@@ -54,22 +52,22 @@ export async function resolvePackageFilesWithConflicts(
     localRootCandidates,
     workspaceRootCandidates
   ] = await Promise.all([
-    loadLocalCandidates(packageDir),
-    discoverWorkspaceCandidates(cwd, packageInfo.config.name),
-    loadLocalRootSaveCandidates(packageDir, packageInfo.config.name),
-    discoverWorkspaceRootSaveCandidates(cwd, packageInfo.config.name)
+    loadLocalCandidates(packageRootDir),
+    discoverWorkspaceCandidates(cwd, packageContext.config.name),
+    loadLocalRootSaveCandidates(packageRootDir, packageContext.config.name),
+    discoverWorkspaceRootSaveCandidates(cwd, packageContext.config.name)
   ]);
 
   const localCandidates = [...localPlatformCandidates, ...localRootCandidates];
 
-  const indexRecord = await readPackageIndex(cwd, packageInfo.config.name);
+  const indexRecord = await readPackageIndex(cwd, packageContext.config.name, packageContext.location);
 
   if (!indexRecord || Object.keys(indexRecord.files ?? {}).length === 0) {
     // No index yet (first save) – run root-only conflict resolution so prompts are shown for CLAUDE.md, WARP.md, etc.
     const rootGroups = buildCandidateGroups(localRootCandidates, workspaceRootCandidates);
 
     // Prune platform-specific root candidates that already exist locally (e.g., CLAUDE.md present)
-    await pruneWorkspaceCandidatesWithLocalPlatformVariants(packageDir, rootGroups);
+    await pruneWorkspaceCandidatesWithLocalPlatformVariants(packageRootDir, rootGroups);
 
     for (const group of rootGroups) {
       const hasLocal = !!group.local;
@@ -94,7 +92,7 @@ export async function resolvePackageFilesWithConflicts(
       const { selection, platformSpecific } = resolution;
 
       // Always write universal AGENTS.md from the selected root section
-      await writeRootSelection(packageDir, packageInfo.config.name, group.local, selection);
+      await writeRootSelection(packageRootDir, packageContext.config.name, group.local, selection);
 
       // Persist platform-specific root selections (e.g., CLAUDE.md, WARP.md)
       for (const candidate of platformSpecific) {
@@ -104,7 +102,7 @@ export async function resolvePackageFilesWithConflicts(
         const platformRegistryPath = createPlatformSpecificRegistryPath(group.registryPath, platform);
         if (!platformRegistryPath) continue;
 
-        const targetPath = join(packageDir, platformRegistryPath);
+        const targetPath = join(packageRootDir, platformRegistryPath);
         try {
           await ensureDir(dirname(targetPath));
 
@@ -128,7 +126,7 @@ export async function resolvePackageFilesWithConflicts(
     }
 
     // After resolving root conflicts, return filtered files from local dir
-    return await readFilteredLocalPackageFiles(packageDir);
+    return await readPackageFilesForRegistry(packageRootDir);
   }
 
   const fileKeys = new Set<string>();
@@ -166,10 +164,12 @@ export async function resolvePackageFilesWithConflicts(
   const workspaceCandidates = [...filteredWorkspacePlatformCandidates, ...filteredWorkspaceRootCandidates];
 
   const groups = buildCandidateGroups(localCandidates, workspaceCandidates);
-  const frontmatterPlans = buildFrontmatterMergePlans(groups);
+  let frontmatterPlans = await buildFrontmatterMergePlans(packageRootDir, groups);
+  const frontmatterPlanMap = new Map(frontmatterPlans.map(plan => [plan.registryPath, plan]));
+  const pathsWithFrontmatterPlans = new Set(frontmatterPlanMap.keys());
 
   // Prune platform-specific workspace candidates that already have local platform-specific files
-  await pruneWorkspaceCandidatesWithLocalPlatformVariants(packageDir, groups);
+  await pruneWorkspaceCandidatesWithLocalPlatformVariants(packageRootDir, groups);
 
   // Resolve conflicts and write chosen content back to local files
   for (const group of groups) {
@@ -198,12 +198,33 @@ export async function resolvePackageFilesWithConflicts(
     const { selection, platformSpecific } = resolution;
 
     if (group.registryPath === FILE_PATTERNS.AGENTS_MD && selection.isRootFile) {
-      await writeRootSelection(packageDir, packageInfo.config.name, group.local, selection);
+      await writeRootSelection(packageRootDir, packageContext.config.name, group.local, selection);
       // Continue to platform-specific persistence below (don't skip it)
+    } else if (pathsWithFrontmatterPlans.has(group.registryPath)) {
+      // Only update markdown body; frontmatter will be handled by merge plans
+      if (group.local) {
+        const localBody = group.local.markdownBody ?? group.local.content;
+        const selectionBody = selection.markdownBody ?? selection.content;
+
+        if ((selectionBody ?? '').trim() !== (localBody ?? '').trim()) {
+          const targetPath = join(packageRootDir, group.registryPath);
+          const localFrontmatter = group.local.frontmatter;
+          const updatedContent = composeMarkdown(localFrontmatter, selectionBody);
+
+          try {
+            await writeTextFile(targetPath, updatedContent, UTF8_ENCODING);
+            logger.debug(
+              `Updated markdown body (frontmatter deferred to merge plan): ${group.registryPath}`
+            );
+          } catch (error) {
+            logger.warn(`Failed to update markdown body for ${group.registryPath}: ${error}`);
+          }
+        }
+      }
     } else {
       if (group.local && selection.contentHash !== group.local.contentHash) {
         // Overwrite local file content with selected content
-        const targetPath = join(packageDir, group.registryPath);
+        const targetPath = join(packageRootDir, group.registryPath);
         try {
           await writeTextFile(targetPath, selection.content, UTF8_ENCODING);
           logger.debug(`Updated local file with selected content: ${group.registryPath}`);
@@ -212,7 +233,7 @@ export async function resolvePackageFilesWithConflicts(
         }
       } else if (!group.local) {
         // No local file existed; write the selected content to create it
-        const targetPath = join(packageDir, group.registryPath);
+        const targetPath = join(packageRootDir, group.registryPath);
         try {
           await ensureDir(dirname(targetPath));
           await writeTextFile(targetPath, selection.content, UTF8_ENCODING);
@@ -236,7 +257,7 @@ export async function resolvePackageFilesWithConflicts(
         continue;
       }
 
-      const targetPath = join(packageDir, platformRegistryPath);
+      const targetPath = join(packageRootDir, platformRegistryPath);
 
       try {
         await ensureDir(dirname(targetPath));
@@ -255,6 +276,27 @@ export async function resolvePackageFilesWithConflicts(
 
         await writeTextFile(targetPath, contentToWrite, UTF8_ENCODING);
         logger.debug(`Wrote platform-specific file: ${platformRegistryPath}`);
+
+        if (pathsWithFrontmatterPlans.has(group.registryPath)) {
+          const overrideRelativePath = getOverrideRelativePath(group.registryPath, platform);
+          if (overrideRelativePath) {
+          const overrideFullPath = join(packageRootDir, overrideRelativePath);
+            if (await exists(overrideFullPath)) {
+              await remove(overrideFullPath);
+              logger.debug(`Removed redundant platform override: ${overrideRelativePath}`);
+            }
+          }
+
+          const plan = frontmatterPlanMap.get(group.registryPath);
+          if (plan) {
+            plan.workspaceEntries = plan.workspaceEntries.filter(entry => entry.platform !== platform);
+            plan.platformOverrides.delete(platform);
+            if (plan.workspaceEntries.length === 0) {
+              frontmatterPlanMap.delete(group.registryPath);
+              pathsWithFrontmatterPlans.delete(group.registryPath);
+            }
+          }
+        }
       } catch (error) {
         logger.warn(`Failed to write platform-specific file ${platformRegistryPath}: ${error}`);
       }
@@ -262,461 +304,18 @@ export async function resolvePackageFilesWithConflicts(
   }
 
   // After resolving conflicts by updating local files, simply read filtered files from local dir
-  await applyFrontmatterMergePlans(packageDir, frontmatterPlans);
-  return await readFilteredLocalPackageFiles(packageDir);
-}
-
-async function loadLocalCandidates(packageDir: string): Promise<SaveCandidate[]> {
-  const entries = await findFilesByExtension(packageDir, [], packageDir);
-
-  const candidates: SaveCandidate[] = [];
-
-  for (const entry of entries) {
-    const normalizedPath = normalizeRegistryPath(entry.relativePath);
-
-    if (normalizedPath === PACKAGE_INDEX_FILENAME) {
-      continue;
-    }
-
-    if (normalizedPath === FILE_PATTERNS.AGENTS_MD) {
-      continue;
-    }
-
-    if (!isAllowedRegistryPath(normalizedPath)) {
-      continue;
-    }
-
-    const fullPath = entry.fullPath;
-    const content = await readTextFile(fullPath);
-    const isMarkdown = normalizedPath.endsWith(FILE_PATTERNS.MD_FILES);
-    const split = isMarkdown ? splitFrontmatter(content) : undefined;
-    const markdownBody = split ? split.body : content;
-    const frontmatter = split?.frontmatter ?? undefined;
-    const rawFrontmatter = split?.rawFrontmatter;
-    const contentHash = await calculateContentHash(normalizedPath, content);
-    const mtime = await getFileMtime(fullPath);
-
-    candidates.push({
-      source: 'local',
-      registryPath: normalizedPath,
-      fullPath,
-      content,
-      contentHash,
-      mtime,
-      displayPath: normalizedPath,
-      isMarkdown,
-      frontmatter,
-      rawFrontmatter,
-      markdownBody
-    });
-  }
-
-  return candidates;
-}
-
-async function discoverWorkspaceCandidates(cwd: string, packageName: string): Promise<SaveCandidate[]> {
-  const discovered = await discoverPlatformFilesUnified(cwd, packageName);
-
-  const candidates: SaveCandidate[] = [];
-
-  for (const file of discovered) {
-    const normalizedPath = normalizeRegistryPath(file.registryPath);
-
-    if (!isAllowedRegistryPath(normalizedPath)) {
-      continue;
-    }
-
-    const content = await readTextFile(file.fullPath);
-    const isMarkdown = normalizedPath.endsWith(FILE_PATTERNS.MD_FILES);
-    const split = isMarkdown ? splitFrontmatter(content) : undefined;
-    const markdownBody = split ? split.body : content;
-    const frontmatter = split?.frontmatter ?? undefined;
-    const rawFrontmatter = split?.rawFrontmatter;
-    const contentHash = await calculateContentHash(normalizedPath, content);
-    const displayPath = getRelativePathFromBase(file.fullPath, cwd) || normalizedPath;
-    const platform = inferPlatformFromWorkspaceFile(file.fullPath, file.sourceDir, normalizedPath);
-
-    candidates.push({
-      source: 'workspace',
-      registryPath: normalizedPath,
-      fullPath: file.fullPath,
-      content,
-      contentHash,
-      mtime: file.mtime,
-      displayPath,
-      platform,
-      isMarkdown,
-      frontmatter,
-      rawFrontmatter,
-      markdownBody
-    });
-  }
-
-  return candidates;
-}
-
-
-
-async function calculateContentHash(registryPath: string, content: string): Promise<string> {
-  const isMarkdown = registryPath.endsWith(FILE_PATTERNS.MD_FILES);
-  const normalizedContent = isMarkdown ? stripFrontmatter(content) : content;
-  return await calculateFileHash(normalizedContent);
-}
-
-function buildCandidateGroups(
-  localCandidates: SaveCandidate[],
-  workspaceCandidates: SaveCandidate[]
-): SaveCandidateGroup[] {
-  const map = new Map<string, SaveCandidateGroup>();
-
-  for (const candidate of localCandidates) {
-    const group = ensureGroup(map, candidate.registryPath);
-    group.local = candidate;
-  }
-
-  for (const candidate of workspaceCandidates) {
-    const group = ensureGroup(map, candidate.registryPath);
-    group.workspace.push(candidate);
-  }
-
-  return Array.from(map.values());
-}
-
-function ensureGroup(map: Map<string, SaveCandidateGroup>, registryPath: string): SaveCandidateGroup {
-  let group = map.get(registryPath);
-  if (!group) {
-    group = {
-      registryPath,
-      workspace: []
-    };
-    map.set(registryPath, group);
-  }
-  return group;
-}
-
-/**
- * Prune platform-specific workspace candidates that already have local platform-specific files.
- * This prevents false conflicts when platform-specific workspace files are mapped to universal
- * registry paths but corresponding platform-specific files already exist in the package.
- */
-async function pruneWorkspaceCandidatesWithLocalPlatformVariants(
-  packageDir: string,
-  groups: SaveCandidateGroup[]
-): Promise<void> {
-  for (const group of groups) {
-    if (!group.local) {
-      continue;
-    }
-
-    const filtered: SaveCandidate[] = [];
-    for (const candidate of group.workspace) {
-      const platform = candidate.platform;
-      if (!platform || platform === 'ai') {
-        // Keep non-platform-specific candidates
-        filtered.push(candidate);
-        continue;
-      }
-
-      const platformRegistryPath = createPlatformSpecificRegistryPath(group.registryPath, platform);
-      if (!platformRegistryPath) {
-        // Cannot create platform-specific path; keep candidate
-        filtered.push(candidate);
-        continue;
-      }
-
-      const platformFullPath = join(packageDir, platformRegistryPath);
-      if (await exists(platformFullPath)) {
-        // Local platform-specific file already exists; skip this workspace candidate
-        // to avoid false conflict detection
-        logger.debug(
-          `Skipping workspace candidate ${candidate.displayPath} for ${group.registryPath} ` +
-            `because local platform-specific file ${platformRegistryPath} already exists`
-        );
-        continue;
-      }
-
-      // No local platform-specific file exists; keep this candidate for conflict resolution
-      filtered.push(candidate);
-    }
-
-    group.workspace = filtered;
-  }
-}
-
-async function resolveRootGroup(
-  group: SaveCandidateGroup,
-  force: boolean
-): Promise<SaveConflictResolution | undefined> {
-  const orderedCandidates: SaveCandidate[] = [];
-
-  if (group.local) {
-    orderedCandidates.push(group.local);
-  }
-
-  if (group.workspace.length > 0) {
-    const sortedWorkspace = [...group.workspace].sort((a, b) => {
-      if (b.mtime !== a.mtime) {
-        return b.mtime - a.mtime;
-      }
-      return a.displayPath.localeCompare(b.displayPath);
-    });
-    orderedCandidates.push(...sortedWorkspace);
-  }
-
-  if (orderedCandidates.length === 0) {
-    return undefined;
-  }
-
-  const uniqueCandidates = dedupeByHash(orderedCandidates);
-
-  if (uniqueCandidates.length === 1) {
-    return {
-      selection: uniqueCandidates[0],
-      platformSpecific: []
-    };
-  }
-
-  if (group.local) {
-    const localCandidate = group.local;
-    const differsFromAnyWorkspace = group.workspace.some(w => w.contentHash !== localCandidate.contentHash);
-
-    if (differsFromAnyWorkspace) {
-      const latestWorkspaceMtime =
-        group.workspace.length > 0 ? Math.max(...group.workspace.map(w => w.mtime)) : 0;
-
-      if (localCandidate.mtime >= latestWorkspaceMtime) {
-        return {
-          selection: localCandidate,
-          platformSpecific: []
-        };
-      }
-
-      if (force) {
-        logger.info(`Force-selected local version for ${group.registryPath}`);
-        return {
-          selection: localCandidate,
-          platformSpecific: []
-        };
-      }
-
-      return await promptForCandidate(group.registryPath, uniqueCandidates);
-    }
-  }
-
-  if (force) {
-    const selected = pickLatestByMtime(uniqueCandidates);
-    logger.info(`Force-selected ${selected.displayPath} for ${group.registryPath}`);
-    return {
-      selection: selected,
-      platformSpecific: []
-    };
-  }
-
-  return await promptForCandidate(group.registryPath, uniqueCandidates);
-}
-
-async function resolveGroup(
-  group: SaveCandidateGroup,
-  force: boolean
-): Promise<SaveConflictResolution | undefined> {
-  const orderedCandidates: SaveCandidate[] = [];
-
-  if (group.local) {
-    orderedCandidates.push(group.local);
-  }
-
-  if (group.workspace.length > 0) {
-    const sortedWorkspace = [...group.workspace].sort((a, b) => {
-      if (b.mtime !== a.mtime) {
-        return b.mtime - a.mtime;
-      }
-      return a.displayPath.localeCompare(b.displayPath);
-    });
-    orderedCandidates.push(...sortedWorkspace);
-  }
-
-  if (orderedCandidates.length === 0) {
-    return undefined;
-  }
-
-  const uniqueCandidates = dedupeByHash(orderedCandidates);
-
-  if (uniqueCandidates.length === 1) {
-    return {
-      selection: uniqueCandidates[0],
-      platformSpecific: []
-    };
-  }
-
-  // Mirror YAML override behavior: local newer -> no prompt (local wins); workspace newer -> prompt
-  if (group.local) {
-    const localCandidate = group.local;
-    const differsFromAnyWorkspace = group.workspace.some(w => w.contentHash !== localCandidate.contentHash);
-    
-    if (differsFromAnyWorkspace) {
-      const latestWorkspaceMtime = group.workspace.length > 0 
-        ? Math.max(...group.workspace.map(w => w.mtime))
-        : 0;
-      
-      // If local is newer or equal, use it without prompting (matches YAML override behavior)
-      if (localCandidate.mtime >= latestWorkspaceMtime) {
-        return {
-          selection: localCandidate,
-          platformSpecific: []
-        };
-      }
-      
-      // Workspace is newer: prompt unless user explicitly requested --force
-      if (!force) {
-        return await promptForCandidate(group.registryPath, uniqueCandidates);
-      }
-
-      // Explicit --force: always choose local version
-      logger.info(`Force-selected local version for ${group.registryPath}`);
-      return {
-        selection: localCandidate,
-        platformSpecific: []
-      };
-    }
-  }
-
-  // Fallback: prompt when there are multiple unique candidates
-  if (force) {
-    const selected = pickLatestByMtime(uniqueCandidates);
-    logger.info(`Force-selected ${selected.displayPath} for ${group.registryPath}`);
-    return {
-      selection: selected,
-      platformSpecific: []
-    };
-  }
-
-  return await promptForCandidate(group.registryPath, uniqueCandidates);
-}
-
-function dedupeByHash(candidates: SaveCandidate[]): SaveCandidate[] {
-  const seen = new Set<string>();
-  const unique: SaveCandidate[] = [];
-
-  for (const candidate of candidates) {
-    if (seen.has(candidate.contentHash)) {
-      continue;
-    }
-    seen.add(candidate.contentHash);
-    unique.push(candidate);
-  }
-
-  return unique;
-}
-
-function pickLatestByMtime(candidates: SaveCandidate[]): SaveCandidate {
-  let best = candidates[0];
-  for (let i = 1; i < candidates.length; i += 1) {
-    const current = candidates[i];
-    if (current.mtime > best.mtime) {
-      best = current;
-    }
-  }
-  return best;
-}
-
-async function promptForCandidate(
-  registryPath: string,
-  candidates: SaveCandidate[]
-): Promise<SaveConflictResolution> {
-  console.log(`\n⚠️  Conflict detected for ${registryPath}:`);
-  candidates.forEach(candidate => {
-    console.log(`  • ${formatCandidateLabel(candidate)}`);
-  });
-
-  // Stage 1: Allow marking workspace candidates as platform-specific when they advertise a platform
-  const platformEligibleWorkspace = candidates.filter(
-    candidate => candidate.source === 'workspace' && candidate.platform && candidate.platform !== 'ai'
-  );
-  let markedPlatformSpecific: SaveCandidate[] = [];
-
-  if (platformEligibleWorkspace.length > 0) {
-    const options = await Promise.all(
-      platformEligibleWorkspace.map(async candidate => ({
-        platform: candidate.platform ?? 'workspace',
-        sourcePath: candidate.fullPath,
-        preview: await getContentPreview(candidate.fullPath),
-        registryPath: candidate.displayPath
-      }))
-    );
-
-    const indices = await promptPlatformSpecificSelection(
-      options,
-      'Select workspace files to mark as platform-specific:',
-      'Unselected files remain candidates for universal content'
-    );
-
-    const markedIndexSet = new Set<number>(indices);
-    markedPlatformSpecific = platformEligibleWorkspace.filter((_, idx) => markedIndexSet.has(idx));
-  }
-
-  const markedSet = new Set(markedPlatformSpecific);
-
-  // Stage 2: Choose universal from remaining (local + unmarked workspace)
-  const local = candidates.find(candidate => candidate.source === 'local');
-  const remainingWorkspace = candidates.filter(
-    candidate => candidate.source === 'workspace' && !markedSet.has(candidate)
-  );
-  const universalChoices: SaveCandidate[] = [...(local ? [local] : []), ...remainingWorkspace];
-
-  const resolvePlatformSpecific = (selection: SaveCandidate): SaveCandidate[] => {
-    if (!markedSet.has(selection)) {
-      return markedPlatformSpecific;
-    }
-    return markedPlatformSpecific.filter(candidate => candidate !== selection);
-  };
-
-  if (universalChoices.length === 0) {
-    const fallbackSelection = candidates[0];
-    return {
-      selection: fallbackSelection,
-      platformSpecific: resolvePlatformSpecific(fallbackSelection)
-    };
-  }
-
-  if (universalChoices.length === 1) {
-    const selection = universalChoices[0];
-    return {
-      selection,
-      platformSpecific: resolvePlatformSpecific(selection)
-    };
-  }
-
-  const response = await safePrompts({
-    type: 'select',
-    name: 'selectedIndex',
-    message: `Choose universal content to save for ${registryPath}:`,
-    choices: universalChoices.map((candidate, index) => ({
-      title: formatCandidateLabel(candidate),
-      value: index,
-    })),
-    hint: 'Use arrow keys to compare options and press Enter to select'
-  });
-
-  const selectedIndex = (response as any).selectedIndex as number;
-  const selection = universalChoices[selectedIndex];
-  return {
-    selection,
-    platformSpecific: resolvePlatformSpecific(selection)
-  };
-}
-
-function formatCandidateLabel(candidate: SaveCandidate): string {
-  const prefix = candidate.source === 'local' ? 'Package' : 'Workspace';
-  return `${prefix}: ${candidate.displayPath}`;
+  frontmatterPlans = frontmatterPlans.filter(plan => plan.workspaceEntries.length > 0);
+  await applyFrontmatterMergePlans(packageRootDir, frontmatterPlans);
+  return await readPackageFilesForRegistry(packageRootDir);
 }
 
 async function writeRootSelection(
-  packageDir: string,
+  packageRootDir: string,
   packageName: string,
   localCandidate: SaveCandidate | undefined,
   selection: SaveCandidate
 ): Promise<void> {
-  const targetPath = `${packageDir}/${FILE_PATTERNS.AGENTS_MD}`;
+  const targetPath = join(packageRootDir, FILE_PATTERNS.AGENTS_MD);
   const sectionBody = (selection.sectionBody ?? selection.content).trim();
   const finalContent = sectionBody;
 
@@ -734,44 +333,6 @@ async function writeRootSelection(
   } catch (error) {
     logger.warn(`Failed to write root file ${FILE_PATTERNS.AGENTS_MD}: ${error}`);
   }
-}
-
-/**
- * Check if a path is a YAML override file that should be included despite isAllowedRegistryPath filtering.
- * YAML override files are files like "rules/agent.claude.yml" that contain platform-specific frontmatter.
- */
-function isYamlOverrideFileForSave(normalizedPath: string): boolean {
-  // Must be skippable (which includes YAML override check) but not package.yml
-  return normalizedPath !== FILE_PATTERNS.PACKAGE_YML && isSkippableRegistryPath(normalizedPath);
-}
-
-async function readFilteredLocalPackageFiles(packageDir: string): Promise<PackageFile[]> {
-  const entries = await findFilesByExtension(packageDir, [], packageDir);
-  const files: PackageFile[] = [];
-
-  for (const entry of entries) {
-    const normalizedPath = normalizeRegistryPath(entry.relativePath);
-    if (normalizedPath === PACKAGE_INDEX_FILENAME) continue;
-
-    // Allow files that are either allowed by normal rules, root files, YAML override files,
-    // or any root-level files adjacent to package.yml (including package.yml itself)
-    const isAllowed = isAllowedRegistryPath(normalizedPath);
-    const isRoot = isRootRegistryPath(normalizedPath);
-    const isYamlOverride = isYamlOverrideFileForSave(normalizedPath);
-    const isPackageYml = normalizedPath === FILE_PATTERNS.PACKAGE_YML;
-    const isRootLevelFile = !normalizedPath.includes('/');
-
-    if (!isAllowed && !isRoot && !isYamlOverride && !isPackageYml && !isRootLevelFile) continue;
-
-    const content = await readTextFile(entry.fullPath);
-    files.push({
-      path: normalizedPath,
-      content,
-      encoding: UTF8_ENCODING
-    });
-  }
-
-  return files;
 }
 
 

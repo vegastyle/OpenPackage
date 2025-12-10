@@ -1,51 +1,49 @@
 import { join } from 'path';
-import { isJunk } from 'junk';
-import { PLATFORM_AI, PLATFORM_DIRS } from '../../constants/index.js';
 import { exists, isDirectory } from '../../utils/fs.js';
 import {
   getPlatformDefinition,
-  isUniversalSubdirPath
+  getDetectedPlatforms,
+  isUniversalSubdirPath,
+  type Platform
 } from '../../core/platforms.js';
 import type { DiscoveredFile } from '../../types/index.js';
 
-// Import the shared type
-import { buildPlatformSearchConfig, PlatformSearchConfig } from './platform-discovery.js';
 import { discoverFiles } from './file-discovery.js';
 import { normalizePathForProcessing } from '../../utils/path-normalization.js';
+import { WORKSPACE_DISCOVERY_EXCLUDES } from '../../constants/workspace.js';
+import { DIR_PATTERNS } from '../../constants/index.js';
 
 /**
  * Process platform subdirectories (rules/commands/agents) within a base directory
  * Common logic shared between different discovery methods
  */
 async function discoverPlatformFiles(
-  config: PlatformSearchConfig,
-  packageName: string,
+  cwd: string,
+  platform: Platform,
+  packageName: string
 ): Promise<DiscoveredFile[]> {
-
-  // Handle AI directory separately - does not contain platform subdirectory structure
-  if (config.platform === PLATFORM_AI) {
-    return discoverFiles(
-      PLATFORM_DIRS.AI,
-      packageName,
-      config.platform,
-      PLATFORM_DIRS.AI, // AI directory uses 'ai' prefix
-    );
-  }
-
-  const definition = getPlatformDefinition(config.platform);
+  const definition = getPlatformDefinition(platform);
   const allFiles: DiscoveredFile[] = [];
 
   // Process each universal subdir that this platform supports
   for (const [subdirName, subdirDef] of Object.entries(definition.subdirs)) {
-    const subdirPath = join(config.rootDir, subdirDef.path);
+    if (!subdirDef) {
+      continue;
+    }
+    const subdirPath = join(cwd, definition.rootDir, subdirDef.path);
+    const allowedExts = subdirDef.exts;
+
+    if (allowedExts && allowedExts.length === 0) {
+      continue;
+    }
 
     if (await exists(subdirPath) && await isDirectory(subdirPath)) {
-      const files = await discoverFiles(
-        subdirPath,
-        packageName,
-        config.platform,
-        subdirName, // Universal registry path
-      );
+      const files = await discoverFiles(subdirPath, packageName, {
+        platform,
+        registryPathPrefix: `${DIR_PATTERNS.OPENPACKAGE}/${subdirName}`,
+        sourceDirLabel: platform,
+        fileExtensions: allowedExts
+      });
       allFiles.push(...files);
     }
   }
@@ -61,8 +59,7 @@ function dedupeDiscoveredFilesPreferUniversal(files: DiscoveredFile[]): Discover
     // Normalize registry path to use forward slashes for consistent comparison
     const normalizedPath = normalizePathForProcessing(file.registryPath);
 
-    if (isUniversalSubdirPath(normalizedPath)) return 3;
-    if (normalizedPath.startsWith(`${PLATFORM_DIRS.AI}/`) || normalizedPath === PLATFORM_DIRS.AI) return 2;
+    if (isUniversalSubdirPath(normalizedPath)) return 2;
     return 1;
   };
 
@@ -83,17 +80,29 @@ function dedupeDiscoveredFilesPreferUniversal(files: DiscoveredFile[]): Discover
 /**
  * Unified file discovery function that searches platform-specific directories
  */
+async function discoverWorkspaceFiles(cwd: string, packageName: string): Promise<DiscoveredFile[]> {
+  return await discoverFiles(cwd, packageName, {
+    registryPathPrefix: '',
+    sourceDirLabel: 'workspace',
+    excludeDirs: WORKSPACE_DISCOVERY_EXCLUDES,
+    fileExtensions: []
+  });
+}
+
 export async function discoverPlatformFilesUnified(cwd: string, packageName: string): Promise<DiscoveredFile[]> {
-  const platformConfigs = await buildPlatformSearchConfig(cwd);
+  const detectedPlatforms = await getDetectedPlatforms(cwd);
   const allDiscoveredFiles: DiscoveredFile[] = [];
 
   // Process all platform configurations in parallel
-  const discoveryPromises = platformConfigs.map(async (config) => {
-    return discoverPlatformFiles(config, packageName);
+  const discoveryPromises = detectedPlatforms.map(async (platform) => {
+    return discoverPlatformFiles(cwd, platform, packageName);
   });
 
   const discoveredFiles = await Promise.all(discoveryPromises);
   allDiscoveredFiles.push(...discoveredFiles.flat());
+
+  const workspaceDiscovered = await discoverWorkspaceFiles(cwd, packageName);
+  allDiscoveredFiles.push(...workspaceDiscovered);
 
   return dedupeDiscoveredFilesPreferUniversal(allDiscoveredFiles);
 }

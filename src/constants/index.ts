@@ -4,55 +4,8 @@
  * file patterns, and other constants used throughout the application.
  */
 
-export const PLATFORMS = {
-  AUGMENT: 'augment',
-  CLAUDE: 'claude',
-  CODEX: 'codex',
-  CURSOR: 'cursor',
-  FACTORY: 'factory',
-  GEMINI: 'gemini',
-  KILO: 'kilo',
-  KIRO: 'kiro',
-  OPENCODE: 'opencode',
-  QWEN: 'qwen',
-  ROO: 'roo',
-  WARP: 'warp',
-  WINDSURF: 'windsurf',
-} as const;
-
-export const PLATFORM_AI = 'ai';
-
-// Human-friendly aliases mapped to platform ids
-export const PLATFORM_ALIASES = {
-  // CODEXCLI
-  codexcli: PLATFORMS.CODEX,
-  // CLAUDECODE
-  claudecode: PLATFORMS.CLAUDE,
-  // GEMINICLI
-  geminicli: PLATFORMS.GEMINI,
-  // KILO
-  kilocode: PLATFORMS.KILO,
-  // QWENCODE
-  qwencode: PLATFORMS.QWEN
-} as const;
-
-export const PLATFORM_DIRS = {
-  OPENPACKAGE: '.openpackage',
-  AI: 'ai',
-
-  AUGMENT: '.augment',
-  CLAUDE: '.claude',
-  CODEX: '.codex',
-  CURSOR: '.cursor',
-  FACTORY: '.factory',
-  GEMINI: '.gemini',
-  KILO: '.kilocode',
-  KIRO: '.kiro',
-  OPENCODE: '.opencode',
-  QWEN: '.qwen',
-  ROO: '.roo',
-  WARP: '.warp',
-  WINDSURF: '.windsurf',
+export const DIR_PATTERNS = {
+  OPENPACKAGE: '.openpackage'
 } as const;
 
 export const FILE_PATTERNS = {
@@ -60,6 +13,7 @@ export const FILE_PATTERNS = {
   MDC_FILES: '.mdc',
   TOML_FILES: '.toml',
   PACKAGE_YML: 'package.yml',
+  PACKAGE_INDEX_YML: 'package.index.yml',
   README_MD: 'README.md',
   // Platform-specific root files
   AGENTS_MD: 'AGENTS.md',
@@ -87,6 +41,22 @@ export const OPENPACKAGE_DIRS = {
   RUNTIME: 'runtime'
 } as const;
 
+/**
+ * Canonical paths within a package (relative to the package root).
+ */
+export const PACKAGE_PATHS = {
+  /**
+   * The canonical location of the package manifest within a package:
+   * <package-root>/.openpackage/package.yml
+   */
+  MANIFEST_RELATIVE: `${DIR_PATTERNS.OPENPACKAGE}/${FILE_PATTERNS.PACKAGE_YML}`,
+  /**
+   * The canonical location of the package index file within a package:
+   * <package-root>/.openpackage/package.index.yml
+   */
+  INDEX_RELATIVE: `${DIR_PATTERNS.OPENPACKAGE}/${FILE_PATTERNS.PACKAGE_INDEX_YML}`,
+} as const;
+
 export const DEPENDENCY_ARRAYS = {
   PACKAGES: 'packages',
   DEV_PACKAGES: 'dev-packages'
@@ -98,9 +68,6 @@ export const CONFLICT_RESOLUTION = {
   OVERWRITTEN: 'overwritten'
 } as const;
 
-// Type exports for better TypeScript integration
-export type Platform = typeof PLATFORMS[keyof typeof PLATFORMS];
-export type PlatformDir = typeof PLATFORM_DIRS[keyof typeof PLATFORM_DIRS];
 export type FilePattern = typeof FILE_PATTERNS[keyof typeof FILE_PATTERNS];
 export type UniversalSubdir = typeof UNIVERSAL_SUBDIRS[keyof typeof UNIVERSAL_SUBDIRS];
 export type OpenPackageDir = typeof OPENPACKAGE_DIRS[keyof typeof OPENPACKAGE_DIRS];

@@ -1,8 +1,16 @@
-import { join, basename } from 'path';
-import { getPlatformDefinition, getDetectedPlatforms, getAllPlatforms, type Platform } from '../core/platforms.js';
-import { FILE_PATTERNS, PLATFORMS, UNIVERSAL_SUBDIRS, type UniversalSubdir, PLATFORM_DIRS } from '../constants/index.js';
-import { normalizePathForProcessing, getRelativePathParts, findSubpathIndex } from './path-normalization.js';
-import { getAllPlatformDirs } from './platform-utils.js';
+import { join, basename, dirname } from 'path';
+import {
+  getPlatformDefinition,
+  getDetectedPlatforms,
+  getAllPlatforms,
+  getWorkspaceExt,
+  getPackageExt,
+  isExtAllowed,
+  type Platform
+} from '../core/platforms.js';
+import { logger } from './logger.js';
+import { UNIVERSAL_SUBDIRS, type UniversalSubdir } from '../constants/index.js';
+import { normalizePathForProcessing, findSubpathIndex } from './path-normalization.js';
 
 /**
  * Normalize platform names from command line input
@@ -38,9 +46,19 @@ export function mapUniversalToPlatform(
   // Build the absolute directory path
   const absDir = join(definition.rootDir, subdirDef.path);
 
-  // Build the absolute file path with correct extension
-  const baseName = relPath.replace(/\.[^.]+$/, ''); // Remove any existing extension from full relPath
-  const targetFileName = subdirDef.writeExt === undefined ? relPath : baseName + subdirDef.writeExt;
+  const packageExtMatch = relPath.match(/\.[^.]+$/);
+  const packageExt = packageExtMatch?.[0] ?? '';
+  const baseName = packageExt ? relPath.slice(0, -packageExt.length) : relPath;
+  const targetExt = packageExt ? getWorkspaceExt(subdirDef, packageExt) : '';
+  if (targetExt && !isExtAllowed(subdirDef, targetExt)) {
+    logger.warn(
+      `Skipped ${relPath} for platform ${platform}: extension ${targetExt} is not allowed in ${subdir}`
+    );
+    throw new Error(
+      `Extension ${targetExt} is not allowed for subdir ${subdir} on platform ${platform}`
+    );
+  }
+  const targetFileName = packageExt ? `${baseName}${targetExt}` : relPath;
   const absFile = join(absDir, targetFileName);
 
   return { absDir, absFile };
@@ -55,7 +73,7 @@ export function mapPlatformFileToUniversal(
   const normalizedPath = normalizePathForProcessing(absPath);
 
   // Check each platform
-  for (const platform of Object.values(PLATFORMS) as Platform[]) {
+  for (const platform of getAllPlatforms({ includeDisabled: true })) {
     const definition = getPlatformDefinition(platform);
 
     // Check each subdir in this platform
@@ -77,10 +95,13 @@ export function mapPlatformFileToUniversal(
 
         let relPath = normalizedPath.substring(relPathStart);
 
-        // Normalize extension to canonical form (.md)
-        // Only normalize if writeExt is defined
-        if (subdirDef.writeExt !== undefined && relPath.endsWith(subdirDef.writeExt)) {
-          relPath = relPath.replace(new RegExp(`${subdirDef.writeExt}$`), FILE_PATTERNS.MD_FILES);
+        const workspaceExtMatch = relPath.match(/\.[^.]+$/);
+        if (workspaceExtMatch) {
+          const workspaceExt = workspaceExtMatch[0];
+          const packageExt = getPackageExt(subdirDef, workspaceExt);
+          if (packageExt !== workspaceExt) {
+            relPath = relPath.slice(0, -workspaceExt.length) + packageExt;
+          }
         }
 
         return { platform, subdir, relPath };
@@ -155,25 +176,12 @@ export function getAllPlatformSubdirs(
  * Uses platform definitions for scalable platform detection
  */
 export function resolveTargetDirectory(targetPath: string, registryPath: string): string {
-  if (!registryPath.endsWith(FILE_PATTERNS.MD_FILES)) {
+  const normalized = normalizePathForProcessing(registryPath);
+  const dir = dirname(normalized);
+  if (!dir || dir === '.' || dir === '') {
     return targetPath;
   }
-
-  // Check if the first part is a known platform directory
-  const pathParts = getRelativePathParts(registryPath);
-  const firstPart = pathParts[0];
-
-  const platformDirectories = getAllPlatformDirs();
-  if (platformDirectories.includes(firstPart)) {
-    // Special case: AI directory should not be prefixed again since it's already the base
-    if (firstPart === PLATFORM_DIRS.AI) {
-      return targetPath;
-    }
-    return join(targetPath, firstPart);
-  }
-
-  // For universal subdirs, return target path as-is
-  return targetPath;
+  return join(targetPath, dir);
 }
 
 /**
@@ -181,20 +189,7 @@ export function resolveTargetDirectory(targetPath: string, registryPath: string)
  * Handles platform-specific file naming conventions using platform definitions
  */
 export function resolveTargetFilePath(targetDir: string, registryPath: string): string {
-  if (!registryPath.endsWith(FILE_PATTERNS.MD_FILES)) {
-    return join(targetDir, registryPath);
-  }
-
-  // Check if the file is in a platform-specific commands directory
-  // If so, just use the basename (they already have the correct structure)
-  for (const platform of getAllPlatforms()) {
-    const definition = getPlatformDefinition(platform);
-    const commandsSubdir = definition.subdirs[UNIVERSAL_SUBDIRS.COMMANDS];
-    if (commandsSubdir && registryPath.includes(join(definition.rootDir, commandsSubdir.path))) {
-      return join(targetDir, basename(registryPath));
-    }
-  }
-
-  // For all other files, preserve the full relative path structure
-  return join(targetDir, registryPath);
+  const normalized = normalizePathForProcessing(registryPath);
+  const fileName = basename(normalized);
+  return join(targetDir, fileName || normalized);
 }

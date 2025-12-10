@@ -1,5 +1,6 @@
 import { join } from 'path';
-import { PLATFORM_DIRS, FILE_PATTERNS, OPENPACKAGE_DIRS } from '../constants/index.js';
+import { DIR_PATTERNS, FILE_PATTERNS, OPENPACKAGE_DIRS } from '../constants/index.js';
+import { DEFAULT_INSTALL_ROOT } from '../constants/workspace.js';
 import { exists } from './fs.js';
 import { arePackageNamesEquivalent, SCOPED_PACKAGE_REGEX } from './package-name.js';
 import { parsePackageYml } from './package-yml.js';
@@ -13,7 +14,7 @@ import { parsePackageYml } from './package-yml.js';
  * Get the path to the local package.yml file
  */
 export function getLocalPackageYmlPath(cwd: string): string {
-  return join(cwd, PLATFORM_DIRS.OPENPACKAGE, FILE_PATTERNS.PACKAGE_YML);
+  return join(cwd, DIR_PATTERNS.OPENPACKAGE, FILE_PATTERNS.PACKAGE_YML);
 }
 
 /**
@@ -37,14 +38,14 @@ export async function isRootPackage(cwd: string, packageName: string): Promise<b
  * Get the local OpenPackage directory path
  */
 export function getLocalOpenPackageDir(cwd: string): string {
-  return join(cwd, PLATFORM_DIRS.OPENPACKAGE);
+  return join(cwd, DIR_PATTERNS.OPENPACKAGE);
 }
 
 /**
  * Get the local packages directory path
  */
 export function getLocalPackagesDir(cwd: string): string {
-  return join(cwd, PLATFORM_DIRS.OPENPACKAGE, OPENPACKAGE_DIRS.PACKAGES);
+  return join(cwd, DIR_PATTERNS.OPENPACKAGE, OPENPACKAGE_DIRS.PACKAGES);
 }
 
 /**
@@ -55,15 +56,23 @@ export function getLocalPackageDir(cwd: string, packageName: string): string {
   const scopedMatch = packageName.match(SCOPED_PACKAGE_REGEX);
   if (scopedMatch) {
     const [, scope, localName] = scopedMatch;
-    return join(cwd, PLATFORM_DIRS.OPENPACKAGE, OPENPACKAGE_DIRS.PACKAGES, '@' + scope, localName);
+    return join(cwd, DIR_PATTERNS.OPENPACKAGE, OPENPACKAGE_DIRS.PACKAGES, '@' + scope, localName);
   }
-  return join(cwd, PLATFORM_DIRS.OPENPACKAGE, OPENPACKAGE_DIRS.PACKAGES, packageName);
+  return join(cwd, DIR_PATTERNS.OPENPACKAGE, OPENPACKAGE_DIRS.PACKAGES, packageName);
 }
 
 /**
- * Get the AI directory path
+ * Get the content directory (.openpackage/) for a nested package.
+ * This is where package.yml, the package index file, and universal content live.
  */
-export function getAIDir(cwd: string): string {
-  return join(cwd, PLATFORM_DIRS.AI);
+export function getLocalPackageContentDir(cwd: string, packageName: string): string {
+  return join(getLocalPackageDir(cwd, packageName), DIR_PATTERNS.OPENPACKAGE);
+}
+
+/**
+ * Get the default workspace install root path
+ */
+export function getInstallRootDir(cwd: string): string {
+  return join(cwd, DEFAULT_INSTALL_ROOT);
 }
 

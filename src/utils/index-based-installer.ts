@@ -15,17 +15,17 @@ import { getLocalPackagesDir } from './paths.js';
 import { packageManager } from '../core/package.js';
 import { logger } from './logger.js';
 import {
-  PLATFORM_DIRS,
   FILE_PATTERNS,
-  UNIVERSAL_SUBDIRS,
-  type Platform
+  UNIVERSAL_SUBDIRS
 } from '../constants/index.js';
-import { getFirstPathComponent, getPathAfterFirstComponent, normalizePathForProcessing } from './path-normalization.js';
+import type { Platform } from '../core/platforms.js';
+import { normalizePathForProcessing } from './path-normalization.js';
 import {
   isAllowedRegistryPath,
   isRootRegistryPath,
   isSkippableRegistryPath,
-  normalizeRegistryPath
+  normalizeRegistryPath,
+  extractUniversalSubdirInfo
 } from './registry-entry-filter.js';
 import { mapUniversalToPlatform } from './platform-mapper.js';
 import { safePrompts } from './prompts.js';
@@ -36,7 +36,6 @@ import { parseUniversalPath } from './platform-file.js';
 import { getPlatformDefinition } from '../core/platforms.js';
 
 import {
-  PACKAGE_INDEX_FILENAME,
   getPackageIndexPath,
   readPackageIndex,
   writePackageIndex,
@@ -44,7 +43,8 @@ import {
   ensureTrailingSlash,
   isDirKey,
   type PackageIndexRecord,
-  pruneNestedDirectories
+  pruneNestedDirectories,
+  type PackageIndexLocation
 } from './package-index-yml.js';
 import { createWorkspaceHash } from './version-generator.js';
 
@@ -63,7 +63,7 @@ interface RegistryFileEntry {
 interface PlannedTarget {
   absPath: string;
   relPath: string;
-  platform?: Platform | 'ai' | 'other';
+  platform?: Platform | 'other';
 }
 
 interface PlannedFile {
@@ -77,7 +77,7 @@ interface GroupPlan {
   key: string;
   plannedFiles: PlannedFile[];
   decision: 'dir' | 'file';
-  platformDecisions: Map<Platform | 'ai' | 'other', 'dir' | 'file'>;
+  platformDecisions: Map<Platform | 'other', 'dir' | 'file'>;
   targetDirs: Set<string>;
 }
 
@@ -471,7 +471,7 @@ export async function loadOtherPackageIndexes(
 
   for (const entry of directories) {
     if (entry.packageName === excludePackage) continue;
-    const indexPath = join(entry.dir, PACKAGE_INDEX_FILENAME);
+    const indexPath = join(entry.dir, FILE_PATTERNS.PACKAGE_INDEX_YML);
     if (!(await exists(indexPath))) continue;
 
     const record = await readPackageIndex(cwd, entry.packageName);
@@ -592,13 +592,6 @@ function deriveGroupKey(registryPath: string): string {
   const first = segments[0];
   const universalValues = Object.values(UNIVERSAL_SUBDIRS) as string[];
 
-  if (first === PLATFORM_DIRS.AI) {
-    if (segments.length >= 2) {
-      return ensureTrailingSlash(`${segments[0]}/${segments[1]}`);
-    }
-    return ensureTrailingSlash(`${segments[0]}`);
-  }
-
   if (universalValues.includes(first)) {
     if (segments.length >= 2) {
       return ensureTrailingSlash(`${segments[0]}/${segments[1]}`);
@@ -659,7 +652,7 @@ function buildPlannedTargetMap(plannedFiles: PlannedFile[], yamlOverrides: Packa
 
         // Compute per-target content (apply platform YAML overrides for universal files)
         let content = planned.content;
-        if (parsed && target.platform && target.platform !== 'ai' && target.platform !== 'other') {
+        if (parsed && target.platform && target.platform !== 'other') {
           content = mergePlatformYamlOverride(
             planned.content,
             target.platform as Platform,
@@ -998,22 +991,11 @@ function mapRegistryPathToTargets(
   platforms: Platform[]
 ): PlannedTarget[] {
   const normalized = normalizeRegistryPath(registryPath);
-  const first = getFirstPathComponent(normalized);
   const targets: PlannedTarget[] = [];
 
-  const universalValues = Object.values(UNIVERSAL_SUBDIRS) as string[];
+  const universalInfo = extractUniversalSubdirInfo(normalized);
 
-  if (first === PLATFORM_DIRS.AI) {
-    const targetAbs = join(cwd, normalized);
-    targets.push({
-      absPath: targetAbs,
-      relPath: normalizeRelativePath(cwd, targetAbs),
-      platform: 'ai'
-    });
-    return targets;
-  }
-
-  if (universalValues.includes(first)) {
+  if (universalInfo) {
     // Parse the universal path to detect platform suffix and normalized relative path
     const parsed = parseUniversalPath(normalized);
 
@@ -1041,10 +1023,10 @@ function mapRegistryPathToTargets(
     }
 
     // No platform suffix: map to all detected/selected platforms
-    const rel = parsed ? parsed.relPath : getPathAfterFirstComponent(normalized);
+    const rel = parsed ? parsed.relPath : universalInfo.relPath;
     for (const platform of platforms) {
       try {
-        const mapped = mapUniversalToPlatform(platform, first as UniversalSubdir, rel);
+        const mapped = mapUniversalToPlatform(platform, universalInfo.universalSubdir as UniversalSubdir, rel);
         const targetAbs = join(cwd, mapped.absFile);
         targets.push({
           absPath: targetAbs,
@@ -1094,8 +1076,8 @@ function attachTargetsToPlannedFiles(
       const baseKey = `${parsed.universalSubdir}/${parsed.relPath}`;
       const excludedPlatforms = overriddenByBase.get(baseKey);
       if (excludedPlatforms && excludedPlatforms.size > 0) {
-        planned.targets = targets.filter(t => 
-          !(t.platform && t.platform !== 'ai' && t.platform !== 'other' && excludedPlatforms.has(t.platform as Platform))
+        planned.targets = targets.filter(t =>
+          !(t.platform && t.platform !== 'other' && excludedPlatforms.has(t.platform as Platform))
         );
       } else {
         planned.targets = targets;
@@ -1125,8 +1107,8 @@ function collectTargetDirectories(plannedFiles: PlannedFile[]): Set<string> {
 
 function collectTargetDirectoriesByPlatform(
   plannedFiles: PlannedFile[]
-): Map<Platform | 'ai' | 'other', Set<string>> {
-  const dirsByPlatform = new Map<Platform | 'ai' | 'other', Set<string>>();
+): Map<Platform | 'other', Set<string>> {
+  const dirsByPlatform = new Map<Platform | 'other', Set<string>>();
   
   for (const planned of plannedFiles) {
     for (const target of planned.targets) {
@@ -1171,7 +1153,7 @@ async function checkPlatformDirectoryOccupancy(
 function hadPreviousDirForPlatform(
   previousIndex: PackageIndexRecord | null,
   groupKey: string,
-  platform: Platform | 'ai' | 'other'
+  platform: Platform | 'other'
 ): boolean {
   if (!previousIndex || platform === 'other') {
     return false;
@@ -1182,9 +1164,7 @@ function hadPreviousDirForPlatform(
     return false;
   }
 
-  const rootDir = platform === 'ai'
-    ? normalizePathForProcessing(PLATFORM_DIRS.AI)
-    : normalizePathForProcessing(getPlatformDefinition(platform as Platform).rootDir);
+  const rootDir = normalizePathForProcessing(getPlatformDefinition(platform).rootDir);
 
   for (const value of prevValues) {
     const normalizedValue = normalizePathForProcessing(value);
@@ -1201,12 +1181,12 @@ function hadPreviousDirForPlatform(
 
 async function determinePlatformDecisions(
   cwd: string,
-  targetDirsByPlatform: Map<Platform | 'ai' | 'other', Set<string>>,
+  targetDirsByPlatform: Map<Platform | 'other', Set<string>>,
   wasDirKey: boolean,
   previousIndex: PackageIndexRecord | null,
   groupKey: string
-): Promise<Map<Platform | 'ai' | 'other', 'dir' | 'file'>> {
-  const platformDecisions = new Map<Platform | 'ai' | 'other', 'dir' | 'file'>();
+): Promise<Map<Platform | 'other', 'dir' | 'file'>> {
+  const platformDecisions = new Map<Platform | 'other', 'dir' | 'file'>();
 
   for (const [platform, platformDirs] of targetDirsByPlatform.entries()) {
     if (wasDirKey && hadPreviousDirForPlatform(previousIndex, groupKey, platform)) {
@@ -1222,7 +1202,7 @@ async function determinePlatformDecisions(
 }
 
 function computeOverallDecision(
-  platformDecisions: Map<Platform | 'ai' | 'other', 'dir' | 'file'>
+  platformDecisions: Map<Platform | 'other', 'dir' | 'file'>
 ): 'dir' | 'file' {
   // Use 'dir' if at least one platform can use it
   // (buildIndexMappingFromPlans will handle per-platform logic)
@@ -1247,7 +1227,7 @@ async function decideGroupPlans(
     const targetDirs = collectTargetDirectories(plannedFiles);
     const targetDirsByPlatform = collectTargetDirectoriesByPlatform(plannedFiles);
     let decision: 'dir' | 'file' = 'file';
-    const platformDecisions = new Map<Platform | 'ai' | 'other', 'dir' | 'file'>();
+    const platformDecisions = new Map<Platform | 'other', 'dir' | 'file'>();
 
     const otherDirOwners = context.dirKeyOwners.get(groupKey) ?? [];
     const hasTargets = plannedFiles.some(file => file.targets.length > 0);
@@ -1358,14 +1338,15 @@ export async function applyPlannedSyncForPackageFiles(
   version: string,
   packageFiles: PackageFile[],
   platforms: Platform[],
-  options: InstallOptions
+  options: InstallOptions,
+  location: PackageIndexLocation = 'nested'
 ): Promise<PlannedSyncOutcome> {
   const registryEntries = filterRegistryEntriesForPackageFiles(packageFiles);
 
   const plannedFiles = createPlannedFiles(registryEntries);
   attachTargetsToPlannedFiles(cwd, plannedFiles, platforms);
 
-  const previousIndex = await readPackageIndex(cwd, packageName);
+  const previousIndex = await readPackageIndex(cwd, packageName, location);
   const otherIndexes = await loadOtherPackageIndexes(cwd, packageName);
   const context = await buildExpandedIndexesContext(cwd, otherIndexes);
 
@@ -1395,7 +1376,7 @@ export async function applyPlannedSyncForPackageFiles(
     mapping = buildIndexMappingFromPlans(groupPlans);
     const workspaceHash = previousIndex?.workspace?.hash ?? createWorkspaceHash(cwd);
     const indexRecord: PackageIndexRecord = {
-      path: getPackageIndexPath(cwd, packageName),
+      path: getPackageIndexPath(cwd, packageName, location),
       packageName,
       workspace: {
         hash: workspaceHash,

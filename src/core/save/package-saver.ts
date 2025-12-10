@@ -1,68 +1,81 @@
-import { PackageFile, PackageYml } from "../../types";
-import { normalizePackageName } from "../../utils/package-name.js";
-import { ensureDir, writeTextFile, remove } from "../../utils/fs.js";
-import { logger } from "../../utils/logger.js";
-import { resolveTargetDirectory, resolveTargetFilePath } from "../../utils/platform-mapper.js";
-import { getPackageVersionPath } from "../directory.js";
-import { UTF8_ENCODING } from "./constants.js";
-import { PackageYmlInfo } from "./package-yml-generator.js";
-import { packageVersionExists } from "../../utils/package-versioning.js";
+/**
+ * Registry write operations for save/pack commands.
+ *
+ * This module handles persisting a package version to the local registry at
+ * ~/.openpackage/registry/<name>/<version>/...
+ */
+
+import type { PackageFile, PackageYml } from '../../types/index.js';
+import type { PackageContext } from '../package-context.js';
+import { normalizePackageName } from '../../utils/package-name.js';
+import { remove } from '../../utils/fs.js';
+import { logger } from '../../utils/logger.js';
+import { getPackageVersionPath } from '../directory.js';
+import { packageVersionExists } from '../../utils/package-versioning.js';
+import { writePackageFilesToDirectory } from '../../utils/package-copy.js';
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Types
+// ─────────────────────────────────────────────────────────────────────────────
+
+export interface SaveToRegistryResult {
+  success: boolean;
+  error?: string;
+  /** The config with normalized package name that was actually written. */
+  updatedConfig?: PackageYml;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Public API
+// ─────────────────────────────────────────────────────────────────────────────
 
 /**
- * Save package to local registry
+ * Save a package version to the local registry.
+ *
+ * - Normalizes the package name for consistent registry paths.
+ * - Clears any existing version directory before writing (idempotent overwrites).
+ * - Writes all provided files to the registry version directory.
+ *
+ * @param packageContext - Metadata about the package (name, version, paths).
+ * @param files - The registry payload to persist.
+ * @returns Result indicating success/failure and the normalized config.
  */
 export async function savePackageToRegistry(
-  packageInfo: PackageYmlInfo,
-  files: PackageFile[],
-  silent: boolean = true
-): Promise<{ success: boolean; error?: string; updatedConfig?: PackageYml }> {
+  packageContext: PackageContext,
+  files: PackageFile[]
+): Promise<SaveToRegistryResult> {
+  const { config } = packageContext;
+  const normalizedName = normalizePackageName(config.name);
+  const normalizedConfig: PackageYml = { ...config, name: normalizedName };
 
-  const config = packageInfo.config;
+  const versionDir = getPackageVersionPath(normalizedName, normalizedConfig.version);
 
   try {
-    // Ensure package name is normalized for consistent registry paths
-    const normalizedConfig = { ...config, name: normalizePackageName(config.name) };
-    const targetPath = getPackageVersionPath(normalizedConfig.name, normalizedConfig.version);
+    await clearExistingVersion(normalizedName, normalizedConfig.version, versionDir);
+    await writePackageFilesToDirectory(versionDir, files);
 
-    // If version already exists, clear the directory first to remove old files
-    if (await packageVersionExists(normalizedConfig.name, normalizedConfig.version)) {
-      await remove(targetPath);
-      logger.debug(`Cleared existing version directory: ${targetPath}`);
-    }
-
-    await ensureDir(targetPath);
-    
-    // Group files by target directory
-    const directoryGroups = new Map<string, PackageFile[]>();
-    
-    for (const file of files) {
-      const targetDir = resolveTargetDirectory(targetPath, file.path);
-      if (!directoryGroups.has(targetDir)) {
-        directoryGroups.set(targetDir, []);
-      }
-      directoryGroups.get(targetDir)!.push(file);
-    }
-    
-    // Save files in parallel by directory
-    const savePromises = Array.from(directoryGroups.entries()).map(async ([dir, dirFiles]) => {
-      await ensureDir(dir);
-      
-      const filePromises = dirFiles.map(async (file) => {
-        const filePath = resolveTargetFilePath(dir, file.path);
-        await writeTextFile(filePath, file.content, (file.encoding as BufferEncoding) || UTF8_ENCODING);
-      });
-      
-      await Promise.all(filePromises);
-    });
-    
-    await Promise.all(savePromises);
-    
-    if (!silent) {
-      logger.info(`Package '${normalizedConfig.name}@${normalizedConfig.version}' saved to local registry`);
-    }
     return { success: true, updatedConfig: normalizedConfig };
   } catch (error) {
-    logger.error(`Failed to save package: ${error}`);
-    return { success: false, error: `Failed to save package: ${error}` };
+    const message = `Failed to save ${normalizedName}@${normalizedConfig.version}: ${error}`;
+    logger.error(message);
+    return { success: false, error: message };
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Helpers
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Remove an existing version directory if present (ensures clean overwrites).
+ */
+async function clearExistingVersion(
+  packageName: string,
+  version: string,
+  versionDir: string
+): Promise<void> {
+  if (await packageVersionExists(packageName, version)) {
+    await remove(versionDir);
+    logger.debug(`Cleared existing registry version: ${versionDir}`);
   }
 }

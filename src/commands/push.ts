@@ -19,11 +19,11 @@ import { getLatestStableVersion } from '../utils/package-versioning.js';
 import { resolveScopedNameForPushWithUserScope, isScopedName } from '../core/scoping/package-scoping.js';
 import { renameRegistryPackage } from '../core/registry/registry-rename.js';
 import { getLocalPackageDir } from '../utils/paths.js';
-import { FILE_PATTERNS } from '../constants/index.js';
+import { FILE_PATTERNS, DIR_PATTERNS } from '../constants/index.js';
 import { exists } from '../utils/fs.js';
 import { parsePackageYml } from '../utils/package-yml.js';
 import { applyWorkspacePackageRename } from '../core/save/workspace-rename.js';
-import type { PackageYmlInfo } from '../core/save/package-yml-generator.js';
+import { type PackageContext } from '../core/package-context.js';
 import { getCurrentUsername } from '../core/api-keys.js';
 import { registryResolver } from '../core/registry-resolver.js';
 
@@ -33,22 +33,29 @@ async function tryRenameWorkspacePackage(
   newName: string
 ): Promise<void> {
   try {
-    const packageDir = getLocalPackageDir(cwd, oldName);
-    const packageYmlPath = join(packageDir, FILE_PATTERNS.PACKAGE_YML);
+    const packageRootDir = getLocalPackageDir(cwd, oldName);
+    const packageYmlPath = join(packageRootDir, DIR_PATTERNS.OPENPACKAGE, FILE_PATTERNS.PACKAGE_YML);
 
     if (!(await exists(packageYmlPath))) {
       return;
     }
 
     const config = await parsePackageYml(packageYmlPath);
-    const packageInfo: PackageYmlInfo = {
-      fullPath: packageYmlPath,
+    
+    // Construct full PackageContext for nested package
+    const packageContext: PackageContext = {
+      name: config.name,
+      version: config.version,
       config,
-      isNewPackage: false,
-      isRootPackage: false
+      packageYmlPath,
+      packageRootDir,
+      packageFilesDir: join(packageRootDir, DIR_PATTERNS.OPENPACKAGE),
+      location: 'nested',
+      isCwdPackage: false,
+      isNew: false
     };
 
-    await applyWorkspacePackageRename(cwd, packageInfo, newName);
+    await applyWorkspacePackageRename(cwd, packageContext, newName);
     console.log(`✓ Updated workspace package name: ${oldName} → ${newName}`);
   } catch (error) {
     logger.debug('Workspace package rename skipped', {

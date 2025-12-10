@@ -1,7 +1,6 @@
 import { join, dirname } from 'path';
-import { FILE_PATTERNS, PLATFORM_AI, PLATFORM_DIRS } from '../../constants/index.js';
-import { buildPlatformSearchConfig } from '../discovery/platform-discovery.js';
-import { getPlatformDefinition, getAllPlatforms, isValidUniversalSubdir } from '../platforms.js';
+import { FILE_PATTERNS } from '../../constants/index.js';
+import { getDetectedPlatforms, getPlatformDefinition, getAllPlatforms, isValidUniversalSubdir } from '../platforms.js';
 import { exists, walkFiles, readTextFile } from '../../utils/fs.js';
 import { extractPackageContentFromRootFile } from '../../utils/root-file-extractor.js';
 
@@ -41,15 +40,11 @@ export async function discoverPackagesForStatus(
   }
 
   // Use same platform detection as uninstall
-  const configs = await buildPlatformSearchConfig(cwd);
+  const platforms = await getDetectedPlatforms(cwd);
 
-  // Process each platform configuration
-  for (const cfg of configs) {
-    if (cfg.platform === PLATFORM_AI) {
-      await discoverAIForPackages(cwd, result, packageNames);
-    } else {
-      await discoverPlatformForPackages(cwd, cfg.platform, result, packageNames);
-    }
+  // Process each platform
+  for (const platform of platforms) {
+    await discoverPlatformForPackages(cwd, platform, result, packageNames);
   }
 
   // Check root files for all packages
@@ -72,28 +67,6 @@ export async function discoverPackagesForStatus(
 /**
  * Discover AI files for requested packages using same logic as uninstall
  */
-async function discoverAIForPackages(
-  cwd: string,
-  result: Map<string, any>,
-  packageNames: string[]
-): Promise<void> {
-  const aiDir = PLATFORM_DIRS.AI;
-  const fullAIDir = join(cwd, aiDir);
-
-  if (!(await exists(fullAIDir))) return;
-
-  // Use same file discovery as uninstall
-  for await (const filePath of walkFiles(fullAIDir)) {
-    if (!filePath.endsWith(FILE_PATTERNS.MD_FILES) && !filePath.endsWith(FILE_PATTERNS.MDC_FILES)) {
-      continue;
-    }
-
-    // Frontmatter support removed - cannot determine package ownership
-  }
-
-  // Index.yml support removed
-}
-
 /**
  * Discover platform files for requested packages using same logic as uninstall
  */
@@ -111,9 +84,11 @@ async function discoverPlatformForPackages(
     if (!(await exists(targetDir))) continue;
 
     for await (const fp of walkFiles(targetDir)) {
-      const allowedExts: string[] = (subDef as any).readExts;
-      // If readExts is empty, include all files (don't filter by extension)
-      if (allowedExts.length > 0 && !allowedExts.some((ext) => fp.endsWith(ext))) continue;
+      const allowedExts: string[] | undefined = (subDef as any).exts;
+      if (allowedExts) {
+        if (allowedExts.length === 0) continue;
+        if (!allowedExts.some((ext) => fp.endsWith(ext))) continue;
+      }
 
       // Frontmatter support removed - cannot determine package ownership
     }
