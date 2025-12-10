@@ -7,6 +7,7 @@ For `save` command:
 - On each save, remove older WIP versions for the same workspace (per `workspaceHash`) to keep the registry clean.
 - Prefer not to update the `package.yml` version number; instead, keep WIP/stable details in `package.index.yml` and registry metadata.
 - The `save` command always saves the next prerelease version based on the current stable (for example: `1.0.0` then `1.0.1-000fz8.a3k`, `1.0.1-000fz9.a3k`, `1.0.1-000fza.a3k`).
+- **Usage:** `opkg save` (cwd package), `opkg save <package>`, or `opkg save <package> <path>` (runs add for the path, then saves).
 
 For `pack` command:
 - This is essentially the same as “promote current workspace state to a stable version”.

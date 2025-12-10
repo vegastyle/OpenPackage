@@ -40,7 +40,8 @@ The pipeline runs in one of two **modes**:
 #### 3. Inputs
 
 - **Working directory (`cwd`)** – establishes the workspace.
-- **Optional package name argument** – may be omitted (context detection) or provided explicitly.
+- **Package name argument (optional)** – may be omitted (context detection) or provided explicitly.
+- **Optional path argument (when package is provided)** – `opkg save <package> <path>` first runs the add pipeline for that path (including conflict handling and optional platform-specific transforms) and then saves the package snapshot.
 
 ---
 
@@ -50,4 +51,5 @@ The pipeline runs in one of two **modes**:
   - In WIP mode: can suppress prompts and allow overwriting existing WIP versions.
   - In stable mode: allows overwriting existing stable registry entries.
 - **`rename <newName>`** – optional new package name to apply during this pipeline run.
+- **`platform-specific` (save only, when path is provided)** – forwarded to the add stage to generate platform-scoped variants for platform subdirectories.
 

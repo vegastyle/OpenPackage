@@ -182,6 +182,7 @@ export interface PullOptions {
 export interface SaveOptions {
   force?: boolean;
   rename?: string;
+  platformSpecific?: boolean;
 }
 
 export interface PackOptions {
