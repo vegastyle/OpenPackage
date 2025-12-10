@@ -56,27 +56,24 @@ export async function parsePackageYml(packageYmlPath: string): Promise<PackageYm
 /**
  * Write package.yml file with consistent formatting
  */
-export async function writePackageYml(packageYmlPath: string, config: PackageYml): Promise<void> {
+export function serializePackageYml(config: PackageYml): string {
   // First generate YAML with default block style
   let content = yaml.dump(config, {
     indent: 2,
     noArrayIndent: true,
     sortKeys: false,
-    quotingType: '"'  // Prefer double quotes for consistency
+    quotingType: '"', // Prefer double quotes for consistency
   });
-  
+
   // Ensure scoped names (starting with @) are quoted
-  const isScoped = isScopedName(config.name);
-  if (isScoped) {
-    // Split into lines and process the name line
+  const scoped = isScopedName(config.name);
+  if (scoped) {
     const lines = content.split('\n');
     for (let i = 0; i < lines.length; i++) {
       if (lines[i].trim().startsWith('name:')) {
-        // Check if the name value is already quoted
         const valueMatch = lines[i].match(/name:\s*(.+)$/);
         if (valueMatch) {
           const value = valueMatch[1].trim();
-          // If not quoted, add quotes
           if (!value.startsWith('"') && !value.startsWith("'")) {
             lines[i] = lines[i].replace(/name:\s*(.+)$/, `name: "${config.name}"`);
           }
@@ -86,42 +83,44 @@ export async function writePackageYml(packageYmlPath: string, config: PackageYml
     }
     content = lines.join('\n');
   }
-  
+
   // Convert arrays from block style to flow style
   const flowStyleArrays = ['keywords'];
-  
+
   for (const arrayField of flowStyleArrays) {
     const arrayValue = config[arrayField as keyof PackageYml];
     if (Array.isArray(arrayValue) && arrayValue.length > 0) {
-      // Split content into lines for easier processing
       const lines = content.split('\n');
       const result: string[] = [];
       let i = 0;
-      
+
       while (i < lines.length) {
         const line = lines[i];
-        
+
         if (line.trim() === `${arrayField}:`) {
-          // Found array section, create flow style
           const arrayFlow = `${arrayField}: [${arrayValue.join(', ')}]`;
           result.push(arrayFlow);
-          
-          // Skip the following dash lines
+
           i++;
           while (i < lines.length && lines[i].trim().startsWith('-')) {
             i++;
           }
           continue;
         }
-        
+
         result.push(line);
         i++;
       }
-      
+
       content = result.join('\n');
     }
   }
-  
+
+  return content;
+}
+
+export async function writePackageYml(packageYmlPath: string, config: PackageYml): Promise<void> {
+  const content = serializePackageYml(config);
   await writeTextFile(packageYmlPath, content);
 }
 

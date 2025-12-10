@@ -6,51 +6,48 @@ import { createHttpClient } from '../../utils/http-client.js';
 import { logger } from '../../utils/logger.js';
 import { normalizePathForProcessing } from '../../utils/path-normalization.js';
 import {
-  ensureScopedPackageName,
+  resolveUploadNameForPush,
   resolvePushResolution,
   resolvePushRequestContext,
   validateUploadVersion,
 } from './push-context.js';
 import { handlePushError } from './push-errors.js';
 import { logPushSummary, printPushSuccess } from './push-output.js';
-import { buildPushPayload, createPushTarball, uploadPackage } from './push-upload.js';
+import { buildPushPayload, createPushTarball, preparePackageForUpload, uploadPackage } from './push-upload.js';
 import type { PushCommandResult, PushPipelineOptions } from './push-types.js';
 
 export async function runPushPipeline(
   packageInput: string,
   options: PushPipelineOptions
 ): Promise<PushCommandResult> {
-  const cwd = process.cwd();
   const authOptions = { profile: options.profile, apiKey: options.apiKey };
 
   const requestContext = resolvePushRequestContext(packageInput, options.paths);
 
-  let packageNameToPush = requestContext.parsedName;
+  const localPackageName = requestContext.parsedName;
+  let uploadPackageName = localPackageName;
   let attemptedVersion: string | undefined;
 
   try {
     logger.info(`Pushing package '${packageInput}' to remote registry`, { options });
     await ensureRegistryDirectories();
 
-    if (!(await packageManager.packageExists(packageNameToPush))) {
-      console.error(`❌ Package '${packageNameToPush}' not found in local registry`);
+    if (!(await packageManager.packageExists(localPackageName))) {
+      console.error(`❌ Package '${localPackageName}' not found in local registry`);
       return { success: false, error: 'Package not found' };
     }
 
     await authManager.validateAuth(authOptions);
-    packageNameToPush = await ensureScopedPackageName(cwd, packageNameToPush, authOptions);
+    uploadPackageName = await resolveUploadNameForPush(localPackageName, authOptions);
 
-    const { pkg, versionToPush } = await resolvePushResolution(
-      packageNameToPush,
-      requestContext.parsedVersion
-    );
+    const { pkg, versionToPush } = await resolvePushResolution(localPackageName, requestContext.parsedVersion);
     attemptedVersion = versionToPush;
 
     if (requestContext.mode === 'partial') {
       const missing = findMissingPaths(pkg, requestContext.requestedPaths);
       if (missing.length > 0) {
         missing.forEach((path) =>
-          console.error(`❌ Path '${path}' not found in local registry for '${packageNameToPush}'`)
+          console.error(`❌ Path '${path}' not found in local registry for '${uploadPackageName}'`)
         );
         return { success: false, error: 'Requested path not found in local registry' };
       }
@@ -58,21 +55,22 @@ export async function runPushPipeline(
 
     validateUploadVersion(versionToPush);
 
+    const uploadPkg = preparePackageForUpload(pkg, uploadPackageName);
     const httpClient = await createHttpClient(authOptions);
     const registryUrl = authManager.getRegistryUrl();
     const profile = authManager.getCurrentProfile(authOptions);
     logPushSummary({
-      packageName: packageNameToPush,
+      packageName: uploadPackageName,
       profile,
       registryUrl,
-      pkg,
+      pkg: uploadPkg,
       mode: requestContext.mode,
       requestedPaths: requestContext.requestedPaths,
     });
 
-    const payload = buildPushPayload(pkg, requestContext.mode, requestContext.requestedPaths);
+    const payload = buildPushPayload(uploadPkg, requestContext.mode, requestContext.requestedPaths);
     const tarballInfo = await createPushTarball(payload);
-    const response = await uploadPackage(httpClient, packageNameToPush, versionToPush, tarballInfo);
+    const response = await uploadPackage(httpClient, uploadPackageName, versionToPush, tarballInfo);
 
     printPushSuccess(response, tarballInfo, registryUrl);
 
@@ -89,7 +87,7 @@ export async function runPushPipeline(
       },
     };
   } catch (error) {
-    return handlePushError(error, packageNameToPush, attemptedVersion, requestContext.parsedVersion);
+    return handlePushError(error, uploadPackageName, attemptedVersion, requestContext.parsedVersion);
   }
 }
 

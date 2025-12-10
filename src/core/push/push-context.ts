@@ -1,19 +1,12 @@
-import { join } from 'path';
 import * as semver from 'semver';
 
-import { FILE_PATTERNS, DIR_PATTERNS, UNVERSIONED } from '../../constants/index.js';
+import { UNVERSIONED } from '../../constants/index.js';
 import { getCurrentUsername } from '../api-keys.js';
 import { listPackageVersions } from '../directory.js';
 import { packageManager } from '../package.js';
-import type { PackageContext } from '../package-context.js';
-import { applyWorkspacePackageRename } from '../save/workspace-rename.js';
 import { resolveScopedNameForPushWithUserScope, isScopedName } from '../scoping/package-scoping.js';
-import { renameRegistryPackage } from '../registry/registry-rename.js';
 import { parsePackagePushSpec } from '../../utils/package-name.js';
-import { parsePackageYml } from '../../utils/package-yml.js';
 import { getLatestStableVersion } from '../../utils/package-versioning.js';
-import { getLocalPackageDir } from '../../utils/paths.js';
-import { exists } from '../../utils/fs.js';
 import { promptConfirmation } from '../../utils/prompts.js';
 import { logger } from '../../utils/logger.js';
 import { PushError } from './push-errors.js';
@@ -39,8 +32,7 @@ export function resolvePushRequestContext(
   };
 }
 
-export async function ensureScopedPackageName(
-  cwd: string,
+export async function resolveUploadNameForPush(
   packageName: string,
   authOptions: PushOptions
 ): Promise<string> {
@@ -49,12 +41,7 @@ export async function ensureScopedPackageName(
   }
 
   const username = await getCurrentUsername(authOptions);
-  const scopedName = await resolveScopedNameForPushWithUserScope(packageName, username, authOptions.profile);
-
-  await renameRegistryPackage(packageName, scopedName);
-  await tryRenameWorkspacePackage(cwd, packageName, scopedName);
-
-  return scopedName;
+  return await resolveScopedNameForPushWithUserScope(packageName, username, authOptions.profile);
 }
 
 export async function resolvePushResolution(
@@ -138,44 +125,6 @@ function logVersionMismatch(packageName: string, requested: string, manifestVers
       packageName,
       manifestVersion,
       requested
-    });
-  }
-}
-
-async function tryRenameWorkspacePackage(
-  cwd: string,
-  oldName: string,
-  newName: string
-): Promise<void> {
-  try {
-    const packageRootDir = getLocalPackageDir(cwd, oldName);
-    const packageYmlPath = join(packageRootDir, DIR_PATTERNS.OPENPACKAGE, FILE_PATTERNS.PACKAGE_YML);
-
-    if (!(await exists(packageYmlPath))) {
-      return;
-    }
-
-    const config = await parsePackageYml(packageYmlPath);
-
-    const packageContext: PackageContext = {
-      name: config.name,
-      version: config.version,
-      config,
-      packageYmlPath,
-      packageRootDir,
-      packageFilesDir: join(packageRootDir, DIR_PATTERNS.OPENPACKAGE),
-      location: 'nested',
-      isCwdPackage: false,
-      isNew: false
-    };
-
-    await applyWorkspacePackageRename(cwd, packageContext, newName);
-    console.log(`✓ Updated workspace package name: ${oldName} → ${newName}`);
-  } catch (error) {
-    logger.debug('Workspace package rename skipped', {
-      oldName,
-      newName,
-      error: error instanceof Error ? error.message : String(error)
     });
   }
 }

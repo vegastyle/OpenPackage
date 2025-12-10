@@ -1,10 +1,12 @@
 import { PACKAGE_PATHS } from '../../constants/index.js';
 import type { PushPackageResponse } from '../../types/api.js';
+import type { Package } from '../../types/index.js';
 import { formatFileSize } from '../../utils/formatters.js';
 import type { HttpClient } from '../../utils/http-client.js';
 import { normalizePathForProcessing } from '../../utils/path-normalization.js';
 import { Spinner } from '../../utils/spinner.js';
 import { createFormDataForUpload, createTarballFromPackage } from '../../utils/tarball.js';
+import { serializePackageYml } from '../../utils/package-yml.js';
 import type { PushMode } from './push-types.js';
 
 export function buildPushPayload(
@@ -13,6 +15,34 @@ export function buildPushPayload(
   requestedPaths: string[]
 ): any {
   return mode === 'partial' ? buildPartialTarballPackage(pkg, requestedPaths) : pkg;
+}
+
+export function preparePackageForUpload(pkg: Package, uploadName: string): Package {
+  if (pkg.metadata.name === uploadName) {
+    return pkg;
+  }
+
+  const manifestPath = normalizePathForProcessing(PACKAGE_PATHS.MANIFEST_RELATIVE);
+  const updatedMetadata = { ...pkg.metadata, name: uploadName };
+  let manifestUpdated = false;
+
+  const updatedFiles = pkg.files.map((file) => {
+    if (normalizePathForProcessing(file.path) === manifestPath) {
+      manifestUpdated = true;
+      const content = serializePackageYml(updatedMetadata);
+      return { ...file, content };
+    }
+    return file;
+  });
+
+  if (!manifestUpdated) {
+    throw new Error('package.yml not found in package files');
+  }
+
+  return {
+    metadata: updatedMetadata,
+    files: updatedFiles,
+  };
 }
 
 export async function createPushTarball(pkg: any) {
