@@ -2,6 +2,7 @@ import * as yaml from 'js-yaml';
 import { PullPackageDownload, PullPackageResponse } from '../types/api.js';
 import { Package, PackageYml } from '../types/index.js';
 import { packageManager } from './package.js';
+import type { PackageVersionState } from './package.js';
 import { ensureRegistryDirectories } from './directory.js';
 import { authManager } from './auth.js';
 import { createHttpClient, HttpClient } from '../utils/http-client.js';
@@ -9,6 +10,9 @@ import { extractPackageFromTarball, verifyTarballIntegrity, ExtractedPackage } f
 import { logger } from '../utils/logger.js';
 import { ConfigError, ValidationError } from '../utils/errors.js';
 import { PACKAGE_PATHS } from '../constants/index.js';
+import { formatVersionLabel } from '../utils/package-versioning.js';
+import { normalizeRegistryPath } from '../utils/registry-entry-filter.js';
+import { mergePackageFiles } from '../utils/package-merge.js';
 
 const NETWORK_ERROR_PATTERN = /(fetch failed|ENOTFOUND|EAI_AGAIN|ECONNREFUSED|ECONNRESET|ETIMEDOUT|EHOSTUNREACH|ENETUNREACH|network)/i;
 
@@ -46,11 +50,13 @@ export interface RemotePullOptions {
   preFetchedResponse?: PullPackageResponse;
   httpClient?: HttpClient;
   recursive?: boolean;
+  paths?: string[];
 }
 
 export interface RemoteBatchPullOptions extends RemotePullOptions {
   dryRun?: boolean;
   filter?: (name: string, version: string, download: PullPackageDownload) => boolean;
+  skipIfFull?: boolean;
 }
 
 export type RemotePullFailureReason =
@@ -105,19 +111,110 @@ export interface RemoteBatchPullResult {
   warnings?: string[];
 }
 
-export function parseDownloadName(downloadName: string): { name: string; version: string } {
+function normalizeDownloadPaths(paths?: string[]): string[] {
+  if (!paths || paths.length === 0) {
+    return [];
+  }
+
+  const normalized = paths
+    .filter(path => typeof path === 'string')
+    .map(path => path.startsWith('/') ? path.slice(1) : path)
+    .map(path => normalizeRegistryPath(path))
+    .filter(path => path.length > 0);
+
+  return Array.from(new Set(normalized));
+}
+
+export function buildPullEndpoint(
+  name: string,
+  version?: string,
+  options?: { recursive?: boolean; paths?: string[] }
+): string {
+  const encodedName = encodeURIComponent(name);
+  const hasVersion = version && version !== 'latest';
+  const endpoint = hasVersion
+    ? `/packages/pull/by-name/${encodedName}/v/${encodeURIComponent(version as string)}`
+    : `/packages/pull/by-name/${encodedName}`;
+
+  const params: string[] = [];
+  if (options?.recursive) {
+    params.push('recursive=true');
+  }
+
+  const normalizedPaths = normalizeDownloadPaths(options?.paths);
+  if (normalizedPaths.length > 0) {
+    const encodedPaths = normalizedPaths.map(path => encodeURIComponent(path)).join(',');
+    params.push(`paths=${encodedPaths}`);
+    params.push('includeManifest=true');
+  }
+
+  if (params.length === 0) {
+    return endpoint;
+  }
+
+  const delimiter = endpoint.includes('?') ? '&' : '?';
+  return `${endpoint}${delimiter}${params.join('&')}`;
+}
+
+/**
+ * Parse a download identifier that may contain registry path segments.
+ *
+ * Supports forms like:
+ *   - foo@1.2.3
+ *   - foo/bar@1.2.3
+ *   - @scope/foo/bar@1.2.3
+ *   - foo@1.2.3/path/to/file
+ *   - @scope/foo@1.2.3/path/to/file
+ *
++ * The registry path (if present) is returned separately so callers can
+ * preserve file-level intent once the backend supports file-scoped downloads.
+ */
+export function parseDownloadIdentifier(
+  downloadName: string
+): { packageName: string; version: string; registryPath?: string } {
   const atIndex = downloadName.lastIndexOf('@');
 
   if (atIndex <= 0 || atIndex === downloadName.length - 1) {
     throw new Error(`Invalid download name '${downloadName}'. Expected format '<package>@<version>'.`);
   }
 
-  return {
-    name: downloadName.slice(0, atIndex),
-    version: downloadName.slice(atIndex + 1)
-  };
+  const rawName = downloadName.slice(0, atIndex);
+  const rawVersion = downloadName.slice(atIndex + 1);
+
+  // Parse package name and optional path from the name portion
+  let packageName: string;
+  let namePath: string | undefined;
+  if (rawName.startsWith('@')) {
+    const segments = rawName.split('/');
+    if (segments.length < 2) {
+      throw new Error(`Invalid scoped package in download name '${downloadName}'.`);
+    }
+    packageName = segments.slice(0, 2).join('/'); // @scope/pkg
+    namePath = segments.length > 2 ? segments.slice(2).join('/') : undefined;
+  } else {
+    const segments = rawName.split('/');
+    packageName = segments[0];
+    namePath = segments.length > 1 ? segments.slice(1).join('/') : undefined;
+  }
+
+  // Parse version and optional path from the version portion
+  const versionSegments = rawVersion.split('/');
+  const version = versionSegments[0];
+  const versionPath = versionSegments.length > 1 ? versionSegments.slice(1).join('/') : undefined;
+
+  if (!packageName || !version) {
+    throw new Error(`Invalid download name '${downloadName}'. Expected format '<package>@<version>'.`);
+  }
+
+  const registryPathParts = [namePath, versionPath].filter(Boolean) as string[];
+  const registryPath = registryPathParts.length > 0 ? registryPathParts.join('/') : undefined;
+
+  return { packageName, version, registryPath };
 }
 
+/**
+ * Backward-compatible wrapper returning only name/version.
+ */
 export function aggregateRecursiveDownloads(responses: PullPackageResponse[]): PullPackageDownload[] {
   const aggregated = new Map<string, PullPackageDownload>();
 
@@ -147,6 +244,10 @@ export function aggregateRecursiveDownloads(responses: PullPackageResponse[]): P
   return Array.from(aggregated.values());
 }
 
+export function isPartialDownload(download?: PullPackageDownload): boolean {
+  return Array.isArray(download?.include);
+}
+
 export async function pullDownloadsBatchFromRemote(
   responses: PullPackageResponse | PullPackageResponse[],
   options: RemoteBatchPullOptions = {}
@@ -166,14 +267,26 @@ export async function pullDownloadsBatchFromRemote(
   const pulled: BatchDownloadItemResult[] = [];
   const failed: BatchDownloadItemResult[] = [];
   const warnings: string[] = [];
+  const stateCache = new Map<string, PackageVersionState>();
+
+  const getLocalState = async (name: string, version: string): Promise<PackageVersionState> => {
+    const key = `${name}@${formatVersionLabel(version)}`;
+    const cached = stateCache.get(key);
+    if (cached) {
+      return cached;
+    }
+    const state = await packageManager.getPackageVersionState(name, version);
+    stateCache.set(key, state);
+    return state;
+  };
 
   const tasks = downloads.map(async (download) => {
     const identifier = download.name;
 
-    let parsedName: { name: string; version: string };
+    let parsedName: { packageName: string; version: string; registryPath?: string };
 
     try {
-      parsedName = parseDownloadName(identifier);
+      parsedName = parseDownloadIdentifier(identifier);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       logger.warn(`Skipping download '${identifier}': ${message}`);
@@ -181,7 +294,8 @@ export async function pullDownloadsBatchFromRemote(
       return;
     }
 
-    const { name, version } = parsedName;
+    const { packageName: name, version } = parsedName;
+    const isPartial = isPartialDownload(download);
 
     try {
       if (options.filter && !options.filter(name, version, download)) {
@@ -196,6 +310,17 @@ export async function pullDownloadsBatchFromRemote(
         return;
       }
 
+      if (isPartial && options.skipIfFull !== false) {
+        const localState = await getLocalState(name, version);
+        if (localState.exists && !localState.isPartial) {
+          const skipMessage = `${name}@${version} already exists locally (full); skipping partial download`;
+          logger.info(skipMessage);
+          warnings.push(skipMessage);
+          pulled.push({ name, version, downloadUrl: download.downloadUrl, success: true });
+          return;
+        }
+      }
+
       if (options.dryRun) {
         pulled.push({ name, version, downloadUrl: download.downloadUrl, success: true });
         return;
@@ -205,7 +330,10 @@ export async function pullDownloadsBatchFromRemote(
       const extracted = await extractPackageFromTarball(tarballBuffer);
       const metadata = buildPackageMetadata(extracted, name, version);
 
-      await packageManager.savePackage({ metadata, files: extracted.files });
+      await packageManager.savePackage(
+        { metadata, files: extracted.files },
+        { partial: isPartial }
+      );
 
       pulled.push({ name, version, downloadUrl: download.downloadUrl, success: true });
     } catch (error) {
@@ -275,7 +403,13 @@ export async function fetchRemotePackageMetadata(
     await ensureRegistryDirectories();
 
     const context = await createContext(options);
-    const response = await getRemotePackage(context.httpClient, name, version, options.recursive);
+    const response = await getRemotePackage(
+      context.httpClient,
+      name,
+      version,
+      options.recursive,
+      options.paths
+    );
 
     return {
       success: true,
@@ -302,8 +436,8 @@ export async function pullPackageFromRemote(
     }
 
     const { context, response } = metadataResult;
-    const downloadUrl = resolveDownloadUrl(response);
-    if (!downloadUrl) {
+    const primaryDownload = resolvePrimaryDownload(response);
+    if (!primaryDownload?.downloadUrl) {
       return {
         success: false,
         reason: 'access-denied',
@@ -311,9 +445,11 @@ export async function pullPackageFromRemote(
       };
     }
 
-    const tarballBuffer = await downloadPackageTarball(context.httpClient, downloadUrl);
+    const isPartial = isPartialDownload(primaryDownload);
+    const tarballBuffer = await downloadPackageTarball(context.httpClient, primaryDownload.downloadUrl);
 
-    if (!verifyTarballIntegrity(tarballBuffer, response.version.tarballSize)) {
+    const expectedSize = isPartial ? undefined : response.version.tarballSize;
+    if (!verifyTarballIntegrity(tarballBuffer, expectedSize)) {
       return {
         success: false,
         reason: 'integrity',
@@ -323,17 +459,19 @@ export async function pullPackageFromRemote(
 
     const extracted = await extractPackageFromTarball(tarballBuffer);
 
-    await savePackageToLocalRegistry(response, extracted);
+    await savePackageToLocalRegistry(response, extracted, {
+      partial: isPartial
+    });
 
     return {
       success: true,
       name: response.package.name,
-      version: response.version.version,
+      version: formatVersionLabel(response.version.version),
       response,
       extracted,
       registryUrl: context.registryUrl,
       profile: context.profile,
-      downloadUrl,
+      downloadUrl: primaryDownload.downloadUrl,
       tarballSize: response.version.tarballSize
     };
   } catch (error) {
@@ -341,18 +479,18 @@ export async function pullPackageFromRemote(
   }
 }
 
-function resolveDownloadUrl(response: PullPackageResponse): string | undefined {
+function resolvePrimaryDownload(response: PullPackageResponse): PullPackageDownload | undefined {
   if (!Array.isArray(response.downloads) || response.downloads.length === 0) {
     return undefined;
   }
 
   const primaryMatch = response.downloads.find(download => download.name === response.package.name && download.downloadUrl);
   if (primaryMatch?.downloadUrl) {
-    return primaryMatch.downloadUrl;
+    return primaryMatch;
   }
 
   const fallbackMatch = response.downloads.find(download => download.downloadUrl);
-  return fallbackMatch?.downloadUrl;
+  return fallbackMatch;
 }
 
 async function createResultFromPrefetched(options: RemotePullOptions): Promise<RemotePackageMetadataResult> {
@@ -391,26 +529,43 @@ async function getRemotePackage(
   name: string,
   version?: string,
   recursive?: boolean,
+  paths?: string[],
 ): Promise<PullPackageResponse> {
-  const encodedName = encodeURIComponent(name);
-  let endpoint = version && version !== 'latest'
-    ? `/packages/pull/by-name/${encodedName}/v/${encodeURIComponent(version)}`
-    : `/packages/pull/by-name/${encodedName}`;
-  const finalEndpoint = recursive
-    ? `${endpoint}${endpoint.includes('?') ? '&' : '?'}recursive=true`
-    : endpoint;
-  logger.debug(`Fetching remote package metadata`, { name, version: version ?? 'latest', endpoint: finalEndpoint, recursive: !!recursive });
+  const finalEndpoint = buildPullEndpoint(name, version, { recursive, paths });
+  logger.debug(`Fetching remote package metadata`, {
+    name,
+    version: version ?? 'latest',
+    endpoint: finalEndpoint,
+    recursive: !!recursive,
+    hasPaths: !!paths && paths.length > 0
+  });
   return await httpClient.get<PullPackageResponse>(finalEndpoint);
 }
 
 async function downloadPackageTarball(httpClient: HttpClient, downloadUrl: string): Promise<Buffer> {
-  const buffer = await httpClient.downloadFile(downloadUrl);
+  const downloadHost = (() => {
+    try {
+      return new URL(downloadUrl).host;
+    } catch {
+      return '';
+    }
+  })();
+  const registryHost = (() => {
+    try {
+      return new URL(authManager.getRegistryUrl()).host;
+    } catch {
+      return '';
+    }
+  })();
+  const shouldSkipAuth = downloadHost !== '' && registryHost !== '' && downloadHost !== registryHost;
+  const buffer = await httpClient.downloadFile(downloadUrl, { skipAuth: shouldSkipAuth });
   return Buffer.from(buffer);
 }
 
 async function savePackageToLocalRegistry(
   response: PullPackageResponse,
-  extracted: ExtractedPackage
+  extracted: ExtractedPackage,
+  saveOptions: { partial?: boolean } = {}
 ): Promise<void> {
   const metadata: PackageYml & Record<string, unknown> = {
     name: response.package.name,
@@ -424,12 +579,21 @@ async function savePackageToLocalRegistry(
   (metadata as any).created = response.version.createdAt;
   (metadata as any).updated = response.version.updatedAt;
 
-  const pkg: Package = {
-    metadata: metadata as PackageYml,
-    files: extracted.files
-  };
+  let files = extracted.files;
 
-  await packageManager.savePackage(pkg);
+  if (saveOptions.partial) {
+    try {
+      const existing = await packageManager.loadPackage(response.package.name, response.version.version);
+      files = mergePackageFiles(existing.files, files);
+    } catch {
+      // No existing version; keep files as-is
+    }
+  }
+
+  await packageManager.savePackage(
+    { metadata: metadata as PackageYml, files },
+    { partial: Boolean(saveOptions.partial) }
+  );
 }
 
 function mapErrorToFailure(error: unknown): RemotePullFailure {

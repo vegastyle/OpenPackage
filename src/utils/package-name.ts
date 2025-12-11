@@ -101,6 +101,45 @@ export function parsePackageInput(packageInput: string): { name: string; version
 }
 
 /**
+ * Parse an install spec that may include a registry-relative path:
+ *   - name/path
+ *   - name@version/path
+ * Returns { name, version?, registryPath? }
+ */
+export function parsePackageInstallSpec(
+  raw: string
+): { name: string; version?: string; registryPath?: string } {
+  const firstSlash = raw.indexOf('/', raw.startsWith('@') ? raw.indexOf('/', 1) + 1 : 0);
+  if (firstSlash === -1) {
+    // No path portion; fall back to standard parsing
+    return parsePackageInput(raw);
+  }
+
+  const packagePortion = raw.slice(0, firstSlash);
+  const registryPath = raw.slice(firstSlash + 1);
+  if (!registryPath) {
+    throw new ValidationError(
+      `Invalid install spec '${raw}'. Provide a registry path after the package name, e.g. package/path/to/file.md.`
+    );
+  }
+
+  const { name, version } = parsePackageInput(packagePortion);
+  return { name, version, registryPath };
+}
+
+/**
+ * Parse a push spec that may include a registry-relative path (same format as install):
+ *   - name/path
+ *   - name@version/path
+ * Returns { name, version?, registryPath? }
+ */
+export function parsePackagePushSpec(
+  raw: string
+): { name: string; version?: string; registryPath?: string } {
+  return parsePackageInstallSpec(raw);
+}
+
+/**
  * Normalize a package name to lowercase, handling scoped names properly.
  * Scoped names like @Scope/Name become @scope/name.
  * Regular names like MyPackage become mypackage.

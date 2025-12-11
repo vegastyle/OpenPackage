@@ -79,6 +79,16 @@ The following behavior is preserved from the broader CLI error-handling design, 
   - The command returns an error result:
     - `error: "Version not found"`.
 
+### Requested path not found (partial push)
+
+- Condition:
+  - User requests a partial push (via `--paths` or `<pkg@ver>/<registry-path>`) and one or more paths are missing locally.
+- Behavior:
+  - The CLI prints, for each missing path:
+    - `❌ Path '<path>' not found in local registry for '<pkg>@<version>'`
+  - The command returns an error result:
+    - `error: "Requested path not found in local registry"`.
+
 ### Explicit prerelease version
 
 - Condition:
@@ -97,12 +107,15 @@ The following behavior is preserved from the broader CLI error-handling design, 
   - User runs `opkg push <pkg>` without specifying a version.
   - No **stable** versions of `<pkg>` exist in the local registry.
 - Behavior:
-  - The CLI prints:
-    - `❌ No stable versions found for package '<pkg>'`
-    - `💡 Stable versions can be created using "opkg pack <package>".`
-  - The command returns a **success** result (no error string), so the global error handler:
-    - Does **not** print an additional plain `No stable versions found` line.
-  - This is treated as an informational exit: the user simply needs to create a stable version first.
+  - If a **`0.0.0`** entry exists:
+    - The CLI attempts to push the `0.0.0` package.
+  - If no `0.0.0` entry exists:
+    - The CLI prints:
+      - `❌ No stable versions found for package '<pkg>'`
+      - `💡 Stable versions can be created using "opkg pack <package>".`
+    - The command returns a **success** result (no error string), so the global error handler:
+      - Does **not** print an additional plain `No stable versions found` line.
+    - This is treated as an informational exit: the user needs to create a stable (or unversioned) package first.
 
 ---
 

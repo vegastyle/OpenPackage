@@ -41,6 +41,9 @@ Assuming a valid stable package `pkg` and `versionToPush` have been selected:
 4. **Tarball creation**
 
    - `createTarballFromPackage(pkg)` builds a tarball from the package files.
+   - For **partial pushes** (paths provided via spec or `--paths`):
+     - The tarball is narrowed to only the requested registry paths plus `.openpackage/package.yml`.
+     - File count reflects only the selected files.
    - The CLI prints:
      - `✓ Creating tarball...`
      - `✓ Created tarball (<file-count> files, <formatted-size>)`

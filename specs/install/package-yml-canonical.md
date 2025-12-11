@@ -50,6 +50,7 @@ The aim is to make behavior predictable and avoid “CLI overrides” that silen
       - If only WIP/pre-release exists, the policy may:
         - Use an **exact WIP version** in `package.yml`, or
         - Use a range that explicitly includes that pre-release.
+      - If the selected version is **unversioned** (manifest omits `version`, represented as `0.0.0` internally), persist the dependency entry **without a `version` field** (bare name), rather than writing `0.0.0`.
 
 - **Case B – `opkg install <name>@<spec>`**:
   - `<spec>` is treated as the **initial canonical range** for `<name>`.
@@ -175,7 +176,26 @@ The aim is to make behavior predictable and avoid “CLI overrides” that silen
 
 ---
 
-## 6. Summary invariants
+## 6. Partial installs via `files`
+
+- **Meaning**:
+  - `files` is an optional array of **registry-relative paths** on a dependency entry (`packages` or `dev-packages`).
+  - When present, the dependency is treated as a **partial install**: only the listed registry paths are installed (root files are included only if explicitly listed).
+
+- **Canonical behavior**:
+  - Fresh installs invoked with registry-path syntax (`opkg install <name>/<registry-path>`) **persist** a deduped, normalized `files` list for that dependency.
+  - Re-installs with an existing `files` list **reuse** that list as canonical; a TTY prompt may offer to clear it to switch back to a full install.
+  - Supplying a new path via CLI for a dependency that already has `files` **adds** the path (deduped) before install.
+  - Removing the `files` field (or setting it to `null`/empty) returns the dependency to **full-install semantics**.
+  - If a dependency is currently full (no `files`), a path-based install attempt is **rejected**; convert to partial by editing `package.yml` or reinstalling after removal.
+
+- **Matching rules**:
+  - Paths in `files` are **exact registry paths** (no globs) and are normalized when persisted.
+  - These paths apply to the **root dependency only**; transitive dependencies remain governed by their own manifests.
+
+---
+
+## 7. Summary invariants
 
 - **I1 – Canonical intent**:
   - For direct dependencies, **`package.yml` is always the source of truth**.

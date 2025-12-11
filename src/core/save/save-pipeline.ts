@@ -1,5 +1,5 @@
 import { CommandResult, PackageFile } from '../../types/index.js';
-import { PACKAGE_PATHS } from '../../constants/index.js';
+import { PACKAGE_PATHS, UNVERSIONED } from '../../constants/index.js';
 import { ensureRegistryDirectories } from '../directory.js';
 import { logger } from '../../utils/logger.js';
 import { addPackageToYml, createWorkspacePackageYml } from '../../utils/package-management.js';
@@ -10,7 +10,7 @@ import { readPackageIndex, writePackageIndex } from '../../utils/package-index-y
 import { createWorkspaceHash, createWorkspaceTag } from '../../utils/version-generator.js';
 import { computeWipVersion, computePackTargetVersion } from './save-versioning.js';
 import { savePackageToRegistry } from './package-saver.js';
-import { packageVersionExists } from '../../utils/package-versioning.js';
+import { isUnversionedVersion, packageVersionExists } from '../../utils/package-versioning.js';
 import { deleteWorkspaceWipCopies } from './workspace-wip-cleanup.js';
 import { writePackageYml } from '../../utils/package-yml.js';
 import { formatRegistryPathForDisplay } from '../../utils/registry-paths.js';
@@ -43,7 +43,7 @@ export interface SavePipelineResult {
 export async function runSavePipeline(
   packageName: string | undefined,
   options: SavePipelineOptions
-): Promise<CommandResult<SavePipelineResult>> {
+): Promise<CommandResult<SavePipelineResult | { packageFiles: PackageFile[] }>> {
   const cwd = process.cwd();
   const { mode, force, rename } = options;
   const { op, opCap } = MODE_LABELS[mode];
@@ -98,13 +98,22 @@ export async function runSavePipeline(
   const workspaceHash = createWorkspaceHash(cwd);
   const workspaceTag = createWorkspaceTag(cwd);
 
+  const baseVersion = packageContext.config.version;
+  const isUnversioned = isUnversionedVersion(baseVersion);
+
   let targetVersion: string;
   let shouldBumpPackageYml = false;
   let nextStable: string | undefined;
 
-  if (mode === 'wip') {
+  if (isUnversioned) {
+    if (mode === 'stable') {
+      throw new Error('package.yml must contain a semver version to pack a release.');
+    }
+    targetVersion = UNVERSIONED;
+  } else if (mode === 'wip') {
+    const stableBase = baseVersion as string;
     const wipInfo = computeWipVersion(
-      packageContext.config.version,
+      stableBase,
       indexRecord?.workspace?.version,
       cwd
     );
@@ -113,8 +122,9 @@ export async function runSavePipeline(
     shouldBumpPackageYml = wipInfo.shouldBumpPackageYml;
     nextStable = wipInfo.nextStable;
   } else {
+    const stableBase = baseVersion as string;
     const packInfo = computePackTargetVersion(
-      packageContext.config.version,
+      stableBase,
       indexRecord?.workspace?.version
     );
     if (packInfo.resetMessage) console.log(packInfo.resetMessage);
@@ -174,7 +184,15 @@ export async function runSavePipeline(
   if (packageContext.location !== 'root') {
     const covered = await isPackageTransitivelyCovered(cwd, effectiveConfig.name);
     if (!covered) {
-      await addPackageToYml(cwd, effectiveConfig.name, effectiveConfig.version, false, undefined, true);
+      const versionForYml = isUnversioned ? undefined : effectiveConfig.version;
+      await addPackageToYml(
+        cwd,
+        effectiveConfig.name,
+        versionForYml,
+        false,
+        undefined,
+        true
+      );
     } else {
       logger.debug(`Skipping addition of ${effectiveConfig.name} to package.yml; already covered transitively.`);
     }

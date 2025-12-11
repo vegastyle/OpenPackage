@@ -6,6 +6,7 @@ import { getLocalPackageYmlPath } from '../../utils/paths.js';
 import { parsePackageYml } from '../../utils/package-yml.js';
 import { createCaretRange, parseVersionRange } from '../../utils/version-ranges.js';
 import { arePackageNamesEquivalent } from '../../utils/package-name.js';
+import { UNVERSIONED } from '../../constants/index.js';
 
 export type DependencyTarget = 'packages' | 'dev-packages';
 
@@ -19,6 +20,7 @@ export interface CanonicalInstallPlan {
   dependencyState: 'fresh' | 'existing';
   canonicalRange?: string;
   canonicalTarget?: DependencyTarget;
+  dependencyInclude?: string[];
   persistDecision: PersistDecision;
   compatibilityMessage?: string;
 }
@@ -55,6 +57,7 @@ export async function determineCanonicalInstallPlan(args: CanonicalPlanArgs): Pr
         dependencyState: 'existing',
         canonicalRange: existing.range,
         canonicalTarget: existing.target,
+        dependencyInclude: existing.include,
         persistDecision: { type: 'none' },
         compatibilityMessage: `Using version range from package.yml (${existing.range}); CLI spec '${cliConstraint.displayRange}' is compatible.`
       };
@@ -65,6 +68,7 @@ export async function determineCanonicalInstallPlan(args: CanonicalPlanArgs): Pr
       dependencyState: 'existing',
       canonicalRange: existing.range,
       canonicalTarget: existing.target,
+      dependencyInclude: existing.include,
       persistDecision: { type: 'none' }
     };
   }
@@ -96,7 +100,7 @@ export async function determineCanonicalInstallPlan(args: CanonicalPlanArgs): Pr
 export async function findCanonicalDependency(
   cwd: string,
   packageName: string
-): Promise<{ range: string; target: DependencyTarget } | null> {
+): Promise<{ range: string; target: DependencyTarget; include?: string[] } | null> {
   const packageYmlPath = getLocalPackageYmlPath(cwd);
   if (!(await exists(packageYmlPath))) {
     return null;
@@ -118,7 +122,7 @@ function locateDependencyInArray(
   deps: PackageYml['packages'],
   packageName: string,
   target: DependencyTarget
-): { range: string; target: DependencyTarget } | null {
+): { range: string; target: DependencyTarget; include?: string[] } | null {
   if (!deps) {
     return null;
   }
@@ -128,15 +132,10 @@ function locateDependencyInArray(
     return null;
   }
 
-  if (!entry.version || !entry.version.trim()) {
-    throw new Error(
-      `Dependency '${packageName}' in .openpackage/package.yml must declare a version range. Edit the file and try again.`
-    );
-  }
-
   return {
-    range: entry.version.trim(),
-    target
+    range: entry.version && entry.version.trim() ? entry.version.trim() : '*',
+    target,
+    include: entry.include && entry.include.length > 0 ? [...entry.include] : undefined
   };
 }
 
@@ -182,6 +181,12 @@ export function resolvePersistRange(
 
   if (decision.type === 'explicit') {
     return { range: decision.range, target: decision.target };
+  }
+
+  // For unversioned selections, persist the literal marker instead of attempting
+  // to construct a semver caret range.
+  if (selectedVersion === UNVERSIONED) {
+    return { range: UNVERSIONED, target: decision.target };
   }
 
   const derivedRange = createCaretRange(selectedVersion);

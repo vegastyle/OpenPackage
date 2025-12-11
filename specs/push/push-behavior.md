@@ -3,7 +3,10 @@
 ### Overview
 
 The `opkg push` command uploads a local package version from the **local registry** to the **remote registry**.
-It is **strictly limited to stable versions** (no prerelease versions like `1.2.3-dev.abc`).
+It allows:
+- **Stable versions** (`x.y.z`).
+- **Unversioned packages** (when `package.yml` omits `version`, represented as `0.0.0`).
+It still rejects prerelease versions like `1.2.3-dev.abc`.
 
 This document focuses on user-facing behavior:
 - CLI shapes and arguments.
@@ -20,11 +23,15 @@ This document focuses on user-facing behavior:
 - **Package syntax**:
   - `<name>` – package name, optionally unscoped.
   - `<name>@<version>` – optional explicit version.
+  - `<name@version>/<registry-path>` – partial push of specific registry paths.
+  - `--paths <list>` – comma-separated registry paths for partial push.
 
 Examples:
 - `opkg push my-pack`
 - `opkg push @scope/my-pack`
 - `opkg push my-pack@1.2.3`
+- `opkg push @scope/my-pack/specs/readme.md` (partial push of a single file)
+- `opkg push @scope/my-pack@1.2.3 --paths specs/readme.md,specs/guide.md`
 
 ---
 
@@ -57,24 +64,25 @@ Examples:
 
 ## Implicit version behavior: `opkg push <pkg>`
 
-When no version is specified, the command **only considers stable versions**.
+When no version is specified, the command prefers **stable versions** and can fall back to a **`0.0.0`** package if no stable exists.
 
 High-level flow:
 
 1. Discover all versions of `<pkg>` from the local registry.
 2. Compute the latest **stable** version.
-3. If no stable versions exist:
+3. If no stable versions exist but a **`0.0.0`** entry exists:
+   - Use the `0.0.0` package as the candidate.
+4. If neither stable nor unversioned exists:
    - Inform the user and exit **gracefully** (non-error).
-4. If a stable version exists:
-   - Prompt the user to confirm pushing that version.
+5. If a candidate exists:
+   - Prompt the user to confirm pushing that candidate.
 
 **Details**
 
-- If no stable versions are found:
-  - The CLI prints:
-    - `❌ No stable versions found for package '<pkg>'`
-    - `💡 Stable versions can be created using "opkg pack <package>".`
-  - The command exits with a **success** result (no global error message).
+- If no stable versions are found but a `0.0.0` entry exists:
+  - The CLI notes it will push the `0.0.0` package.
+- If no stable versions and no unversioned entry:
+  - The CLI prints the existing “no stable versions” message and exits successfully.
 - If a stable version (e.g. `1.2.3`) is found:
   - The CLI prompts:
     - `Push latest stable version '1.2.3'?` (default: yes).
@@ -90,6 +98,26 @@ High-level flow:
   - If **stable versions exist**: pick the latest stable, prompt for confirmation, and push if confirmed.
 
 ---
+
+## Partial push behavior (paths)
+
+- Partial pushes upload only specific registry paths from an existing local package version.
+- Paths can be provided via:
+  - `<pkg[@ver]>/<registry-path>`
+  - `--paths specs/readme.md,specs/guide.md`
+- Behavior:
+  1. Scope resolution and version selection run first (explicit or latest-stable).
+  2. Requested paths are normalized and validated against the local package files.
+     - Missing paths fail the push with a clear missing-path message.
+  3. Tarball is narrowed to:
+     - The requested file set.
+     - `.openpackage/package.yml`.
+  4. Upload uses the standard `/packages/push` endpoint.
+
+Notes:
+- This replaces the previous single-file `f` flow; single-file pushes are just partial pushes with one path.
+- Manifest is required; if `.openpackage/package.yml` is missing locally, the CLI errors.
+
 
 ## Stable-only guarantees (behavioral view)
 

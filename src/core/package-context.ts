@@ -44,7 +44,7 @@ export interface PackageContext {
   name: string;
   
   /** Package version from package.yml */
-  version: string;
+  version?: string;
   
   /** Full config from package.yml */
   config: PackageYml;

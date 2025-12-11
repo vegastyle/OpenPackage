@@ -9,6 +9,7 @@ import {
   normalizePathForProcessing
 } from './path-normalization.js';
 import { getAllRootFiles, isPlatformId } from '../core/platforms.js';
+import { isManifestPath } from './manifest-paths.js';
 
 const ROOT_REGISTRY_FILE_NAMES = getAllRootFiles();
 const UNIVERSAL_VALUES: string[] = Object.values(UNIVERSAL_SUBDIRS as Record<string, string>);
@@ -29,8 +30,7 @@ export function isSkippableRegistryPath(registryPath: string): boolean {
   const normalized = normalizeRegistryPath(registryPath);
   
   // Handle package.yml at any level (.openpackage/package.yml, package.yml, etc.)
-  const filename = normalized.split('/').pop();
-  if (filename === FILE_PATTERNS.PACKAGE_YML) {
+  if (isManifestPath(normalized)) {
     return true;
   }
 

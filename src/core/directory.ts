@@ -2,7 +2,7 @@ import * as os from 'os';
 import * as path from 'path';
 import * as semver from 'semver';
 import { OpenPackageDirectories } from '../types/index.js';
-import { DIR_PATTERNS, OPENPACKAGE_DIRS } from '../constants/index.js';
+import { DIR_PATTERNS, OPENPACKAGE_DIRS, UNVERSIONED } from '../constants/index.js';
 import { ensureDir, exists, listDirectories } from '../utils/fs.js';
 import { logger } from '../utils/logger.js';
 import { normalizePackageName } from '../utils/package-name.js';
@@ -107,9 +107,11 @@ export function getPackagePath(packageName: string): string {
 
 /**
  * Get the path for a specific version of a package
+ * If version is undefined, return the unversioned path.
  */
-export function getPackageVersionPath(packageName: string, version: string): string {
-  return path.join(getPackagePath(packageName), version);
+export function getPackageVersionPath(packageName: string, version?: string): string {
+  const versionSegment = version ?? UNVERSIONED;
+  return path.join(getPackagePath(packageName), versionSegment);
 }
 
 /**
@@ -123,7 +125,8 @@ export async function listPackageVersions(packageName: string): Promise<string[]
   }
   
   const versions = await listDirectories(packagePath);
-  return versions.sort((a, b) => semver.compare(b, a)); // Latest first
+  const semverVersions = versions.filter(version => semver.valid(version));
+  return semverVersions.sort((a, b) => semver.compare(b, a)); // Latest first
 }
 
 /**
@@ -131,13 +134,16 @@ export async function listPackageVersions(packageName: string): Promise<string[]
  */
 export async function getLatestPackageVersion(packageName: string): Promise<string | null> {
   const versions = await listPackageVersions(packageName);
-  return versions.length > 0 ? versions[0] : null;
+  if (versions.length === 0) {
+    return null;
+  }
+  return versions[0];
 }
 
 /**
  * Check if a specific version exists
  */
-export async function hasPackageVersion(packageName: string, version: string): Promise<boolean> {
+export async function hasPackageVersion(packageName: string, version?: string): Promise<boolean> {
   const versionPath = getPackageVersionPath(packageName, version);
   return await exists(versionPath);
 }
@@ -191,8 +197,8 @@ export async function listAllPackages(): Promise<string[]> {
     const firstLevelChildren = await listDirectories(firstLevelPath);
 
     // Unscoped packages: name/<version>
-    const hasSemverChildren = firstLevelChildren.some(child => semver.valid(child));
-    if (hasSemverChildren) {
+  const hasValidChildren = firstLevelChildren.some(child => child === UNVERSIONED || semver.valid(child));
+    if (hasValidChildren) {
       result.push(firstLevel);
       continue;
     }
@@ -201,8 +207,8 @@ export async function listAllPackages(): Promise<string[]> {
     for (const secondLevel of firstLevelChildren) {
       const secondLevelPath = path.join(firstLevelPath, secondLevel);
       const secondLevelChildren = await listDirectories(secondLevelPath);
-      const hasSemverGrandchildren = secondLevelChildren.some(child => semver.valid(child));
-      if (hasSemverGrandchildren) {
+      const hasValidGrandchildren = secondLevelChildren.some(child => child === UNVERSIONED || semver.valid(child));
+      if (hasValidGrandchildren) {
         result.push(`${firstLevel}/${secondLevel}`);
       }
     }

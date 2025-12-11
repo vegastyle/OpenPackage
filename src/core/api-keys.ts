@@ -20,13 +20,17 @@ export interface ApiKeyInfo {
 export async function getCurrentApiKeyInfo(
   authOptions: AuthOptions = {}
 ): Promise<ApiKeyInfo> {
-  const { apiKey } = await authManager.validateAuth(authOptions);
+  const apiKey = await authManager.getApiKey(authOptions);
+  if (!apiKey) {
+    throw new Error('No API key found. Configure a profile API key or use --api-key.');
+  }
   const httpClient = await createHttpClient(authOptions);
 
   return await httpClient.get<ApiKeyInfo>('/api-keys/me', {
     headers: {
       'X-API-Key': apiKey
-    }
+    },
+    skipAuth: true
   });
 }
 

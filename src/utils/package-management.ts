@@ -5,14 +5,16 @@ import { parsePackageYml, writePackageYml } from './package-yml.js';
 import { exists, ensureDir } from './fs.js';
 import { logger } from './logger.js';
 import { getLocalOpenPackageDir, getLocalPackageYmlPath, getLocalPackagesDir, getLocalPackageDir } from './paths.js';
-import { DEPENDENCY_ARRAYS } from '../constants/index.js';
+import { DEPENDENCY_ARRAYS, FILE_PATTERNS, PACKAGE_PATHS } from '../constants/index.js';
 import { createCaretRange, hasExplicitPrereleaseIntent, isPrereleaseVersion } from './version-ranges.js';
 import { extractBaseVersion } from './version-generator.js';
+import { isUnversionedVersion } from './package-versioning.js';
 import { normalizePackageName, arePackageNamesEquivalent } from './package-name.js';
 import { packageManager } from '../core/package.js';
 import { promptPackageDetailsForNamed } from './prompts.js';
 import { writePackageFilesToDirectory } from './package-copy.js';
 import { getPackageFilesDir, getPackageYmlPath } from '../core/package-context.js';
+import { buildNormalizedIncludeSet, isManifestPath, normalizePackagePath } from './manifest-paths.js';
 
 /**
  * Ensure local OpenPackage directory structure exists
@@ -41,7 +43,6 @@ export async function createWorkspacePackageYml(cwd: string, force: boolean = fa
   const projectName = basename(cwd);
   const basicPackageYml: PackageYml = {
     name: projectName,
-    version: '0.1.0',
     packages: [],
     'dev-packages': []
   };
@@ -92,19 +93,44 @@ export async function ensurePackageWithYml(
 
   await ensureDir(packageDir);
 
-  let packageConfig: PackageYml;
+  let packageConfig: PackageYml | undefined;
   let isNew = false;
 
   if (await exists(packageYmlPath)) {
     packageConfig = await parsePackageYml(packageYmlPath);
   } else {
     isNew = true;
-    if (options.interactive) {
-      packageConfig = await promptPackageDetailsForNamed(normalizedName);
-    } else {
+    // Try to seed from existing local registry copy to avoid prompts and preserve metadata.
+    try {
+      const registryExists = await packageManager.packageExists(normalizedName);
+      if (registryExists) {
+        const existing = await packageManager.loadPackage(normalizedName);
+        packageConfig = {
+          ...existing.metadata,
+          name: normalizedName,
+          partial: true
+        };
+        logger.info(`Loaded package.yml for '${normalizedName}' from local registry copy`);
+        console.log(`✓ Loaded package.yml from local registry for ${normalizedName}`);
+      }
+    } catch (error) {
+      logger.debug('Unable to seed package.yml from registry; falling back to prompts', { normalizedName, error });
+    }
+
+    if (!packageConfig) {
+      if (options.interactive) {
+        console.log(`Create new package "${normalizedName}"`);
+        packageConfig = await promptPackageDetailsForNamed(normalizedName);
+      } else {
+        packageConfig = {
+          name: normalizedName,
+          ...(options.defaultVersion ? { version: options.defaultVersion } : {})
+        };
+      }
+
       packageConfig = {
-        name: normalizedName,
-        version: options.defaultVersion ?? '0.1.0'
+        ...packageConfig,
+        partial: true
       };
     }
 
@@ -116,7 +142,9 @@ export async function ensurePackageWithYml(
     }
 
     await writePackageYml(packageYmlPath, packageConfig);
-    logger.info(`Created new package '${packageConfig.name}@${packageConfig.version}' at ${relative(cwd, packageDir)}`);
+    logger.info(
+      `Created new package '${packageConfig.name}${packageConfig.version ? `@${packageConfig.version}` : ''}' at ${relative(cwd, packageDir)}`
+    );
   }
 
   if (packageConfig.name !== normalizedName) {
@@ -141,10 +169,11 @@ export async function ensurePackageWithYml(
 export async function addPackageToYml(
   cwd: string,
   packageName: string,
-  packageVersion: string,
+  packageVersion: string | undefined,
   isDev: boolean = false,
   originalVersion?: string, // The original version/range that was requested
-  silent: boolean = false
+  silent: boolean = false,
+  include?: string[] | null
 ): Promise<void> {
   const packageYmlPath = getLocalPackageYmlPath(cwd);
   
@@ -157,6 +186,7 @@ export async function addPackageToYml(
   if (!config[DEPENDENCY_ARRAYS.DEV_PACKAGES]) config[DEPENDENCY_ARRAYS.DEV_PACKAGES] = [];
 
   const normalizedPackageName = normalizePackageName(packageName);
+  const nameWithVersion = packageVersion ? `${packageName}@${packageVersion}` : packageName;
   const packagesArray = config.packages;
   const devPackagesArray = config[DEPENDENCY_ARRAYS.DEV_PACKAGES]!;
 
@@ -181,42 +211,61 @@ export async function addPackageToYml(
       ? config[currentLocation]![existingIndex]?.version
       : undefined;
 
-  const baseVersion = extractBaseVersion(packageVersion);
-  const defaultRange = createCaretRange(baseVersion);
-  let versionToWrite = originalVersion ?? defaultRange;
+  const shouldOmitVersion = isUnversionedVersion(packageVersion) || isUnversionedVersion(originalVersion);
+  let versionToWrite: string | undefined = shouldOmitVersion ? undefined : originalVersion;
 
-  if (!originalVersion && existingRange) {
-    const hasPrereleaseIntent = hasExplicitPrereleaseIntent(existingRange);
-    const isNewVersionStable = !isPrereleaseVersion(packageVersion);
+  if (!shouldOmitVersion && packageVersion) {
+    const baseVersion = extractBaseVersion(packageVersion);
+    const defaultRange = createCaretRange(baseVersion);
+    versionToWrite = originalVersion ?? defaultRange;
 
-    if (hasPrereleaseIntent) {
-      if (isNewVersionStable) {
-        // Constraint has explicit prerelease intent and we're packing a stable
-        // version on the same base line: normalize to a stable caret.
-        versionToWrite = createCaretRange(baseVersion);
-        logger.debug(
-          `Updating range from prerelease-including '${existingRange}' to stable '${versionToWrite}' ` +
-          `for ${packageName} (pack transition to ${packageVersion})`
-        );
-      } else {
-        // For prerelease-intent ranges during saves (prerelease versions),
-        // always preserve the existing constraint.
+    if (!originalVersion && existingRange) {
+      const hasPrereleaseIntent = hasExplicitPrereleaseIntent(existingRange);
+      const isNewVersionStable = !isPrereleaseVersion(packageVersion);
+
+      if (hasPrereleaseIntent) {
+        if (isNewVersionStable) {
+          // Constraint has explicit prerelease intent and we're packing a stable
+          // version on the same base line: normalize to a stable caret.
+          versionToWrite = createCaretRange(baseVersion);
+          logger.debug(
+            `Updating range from prerelease-including '${existingRange}' to stable '${versionToWrite}' ` +
+            `for ${packageName} (pack transition to ${packageVersion})`
+          );
+        } else {
+          // For prerelease-intent ranges during saves (prerelease versions),
+          // always preserve the existing constraint.
+          versionToWrite = existingRange;
+        }
+      } else if (rangeIncludesVersion(existingRange, baseVersion)) {
+        // Stable (non-prerelease) constraint that already includes the new base
+        // version: keep it unchanged.
         versionToWrite = existingRange;
+      } else {
+        // Stable constraint that does not include the new base version: bump to
+        // a new caret on the packed stable.
+        versionToWrite = defaultRange;
       }
-    } else if (rangeIncludesVersion(existingRange, baseVersion)) {
-      // Stable (non-prerelease) constraint that already includes the new base
-      // version: keep it unchanged.
-      versionToWrite = existingRange;
-    } else {
-      // Stable constraint that does not include the new base version: bump to
-      // a new caret on the packed stable.
-      versionToWrite = defaultRange;
     }
+  }
+
+  const existingDep =
+    currentLocation && existingIndex >= 0 ? config[currentLocation]![existingIndex] : null;
+
+  let includeToWrite: string[] | undefined;
+  if (include === undefined) {
+    includeToWrite = existingDep?.include;
+  } else if (include === null) {
+    includeToWrite = undefined;
+  } else {
+    const unique = Array.from(new Set(include));
+    includeToWrite = unique.length > 0 ? unique : undefined;
   }
 
   const dependency: PackageDependency = {
     name: normalizedPackageName,
-    version: versionToWrite
+    ...(versionToWrite ? { version: versionToWrite } : {}),
+    ...(includeToWrite ? { include: includeToWrite } : {})
   };
   
   // Determine target location (packages vs dev-packages)
@@ -224,10 +273,10 @@ export async function addPackageToYml(
   let targetArray: 'packages' | 'dev-packages';
   if (currentLocation === DEPENDENCY_ARRAYS.DEV_PACKAGES && !isDev) {
     targetArray = DEPENDENCY_ARRAYS.DEV_PACKAGES;
-    logger.info(`Keeping package in dev-packages: ${packageName}@${packageVersion}`);
+    logger.info(`Keeping package in dev-packages: ${nameWithVersion}`);
   } else if (currentLocation === DEPENDENCY_ARRAYS.PACKAGES && isDev) {
     targetArray = DEPENDENCY_ARRAYS.DEV_PACKAGES;
-    logger.info(`Moving package from packages to dev-packages: ${packageName}@${packageVersion}`);
+    logger.info(`Moving package from packages to dev-packages: ${nameWithVersion}`);
   } else {
     targetArray = isDev ? DEPENDENCY_ARRAYS.DEV_PACKAGES : DEPENDENCY_ARRAYS.PACKAGES;
   }
@@ -245,20 +294,22 @@ export async function addPackageToYml(
     currentLocation === targetArray ? findIndex(targetArrayRef) : -1;
   
   if (existingTargetIndex >= 0) {
-    const existingDep = targetArrayRef[existingTargetIndex];
-    const versionChanged = existingDep.version !== dependency.version;
-    if (versionChanged) {
+    const existingDepForTarget = targetArrayRef[existingTargetIndex];
+    const versionChanged = existingDepForTarget.version !== dependency.version;
+    const includeChanged =
+      JSON.stringify(existingDepForTarget.include ?? []) !== JSON.stringify(includeToWrite ?? []);
+    if (versionChanged || includeChanged) {
       targetArrayRef[existingTargetIndex] = dependency;
       if (!silent) {
-        logger.info(`Updated existing package dependency: ${packageName}@${packageVersion}`);
-        console.log(`✓ Updated ${packageName}@${packageVersion} in main package.yml`);
+        logger.info(`Updated existing package dependency: ${nameWithVersion}`);
+        console.log(`✓ Updated ${nameWithVersion} in main package.yml`);
       }
     }
   } else {
     targetArrayRef.push(dependency);
     if (!silent) {
-      logger.info(`Added new package dependency: ${packageName}@${packageVersion}`);
-      console.log(`✓ Added ${packageName}@${packageVersion} to main package.yml`);
+      logger.info(`Added new package dependency: ${nameWithVersion}`);
+      console.log(`✓ Added ${nameWithVersion} to main package.yml`);
     }
   }
   
@@ -280,6 +331,68 @@ export async function writeLocalPackageFromRegistry(
   await writePackageFilesToDirectory(localPackageDir, pkg.files, {
     preserveIndexFile: true
   });
+}
+
+/**
+ * Copy a subset of package files from the local registry into the project cache (.openpackage/packages/<pkg>/),
+ * always including package.yml. Used for partial installs.
+ */
+export async function writePartialLocalPackageFromRegistry(
+  cwd: string,
+  packageName: string,
+  version: string,
+  includePaths: string[]
+): Promise<void> {
+  const pkg = await packageManager.loadPackage(packageName, version);
+  const localPackageDir = getLocalPackageDir(cwd, packageName);
+
+  const normalizedIncludes = buildNormalizedIncludeSet(includePaths);
+
+  const filteredFiles = pkg.files.filter(file => {
+    const p = normalizePackagePath(file.path);
+    if (isManifestPath(p)) return true; // always keep manifest
+    if (p === PACKAGE_PATHS.INDEX_RELATIVE) return false; // never copy index from registry
+    if (!normalizedIncludes) return true;
+    return normalizedIncludes.has(p);
+  });
+
+  await writePackageFilesToDirectory(localPackageDir, filteredFiles, {
+    preserveIndexFile: true
+  });
+}
+
+/**
+ * Update only the include list for an existing dependency in package.yml.
+ * - include: string[] => set/dedupe
+ * - include: null     => clear include field
+ * - include: undefined => no-op
+ */
+export async function updatePackageDependencyInclude(
+  cwd: string,
+  packageName: string,
+  target: 'packages' | 'dev-packages',
+  include: string[] | null | undefined
+): Promise<void> {
+  if (include === undefined) return;
+
+  const packageYmlPath = getLocalPackageYmlPath(cwd);
+  if (!(await exists(packageYmlPath))) return;
+
+  const config = await parsePackageYml(packageYmlPath);
+  const arr = config[target];
+  if (!arr) return;
+
+  const idx = arr.findIndex(dep => arePackageNamesEquivalent(dep.name, packageName));
+  if (idx === -1) return;
+
+  const unique = include === null ? undefined : Array.from(new Set(include));
+  if (unique && unique.length > 0) {
+    arr[idx].include = unique;
+  } else {
+    delete arr[idx].include;
+  }
+
+  await writePackageYml(packageYmlPath, config);
 }
 
 function rangeIncludesVersion(range: string, version: string): boolean {

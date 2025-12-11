@@ -49,6 +49,12 @@ class ProfileManager {
       }
 
       const profileConfig = profiles[profileName];
+      const mergedProfileConfig: ProfileConfig = {
+        ...profileConfig,
+        defaults: {
+          ...(profileConfig.defaults ?? {})
+        }
+      };
       let credentials: ProfileCredentials | undefined;
 
       // Load credentials from credentials file
@@ -64,7 +70,7 @@ class ProfileManager {
 
       return {
         name: profileName,
-        config: profileConfig,
+        config: mergedProfileConfig,
         credentials
       };
     } catch (error) {
@@ -97,6 +103,42 @@ class ProfileManager {
   }
 
   /**
+   * Set or update the default scope for a profile without disturbing other fields.
+   */
+  async setProfileDefaultScope(profileName: string, scope: string): Promise<void> {
+    try {
+      const config = await configManager.getAll();
+      const normalizedScope = scope.startsWith('@') ? scope : `@${scope}`;
+
+      if (!config.profiles) {
+        config.profiles = {};
+      }
+
+      const existingProfile = config.profiles[profileName] ?? {};
+      const currentScope = existingProfile.defaults?.scope;
+
+      // No-op if already set to the desired scope
+      if (currentScope === normalizedScope) {
+        return;
+      }
+
+      config.profiles[profileName] = {
+        ...existingProfile,
+        defaults: {
+          ...(existingProfile.defaults ?? {}),
+          scope: normalizedScope
+        }
+      };
+
+      await configManager.set('profiles' as keyof typeof config, config.profiles);
+      logger.info(`Default scope for profile '${profileName}' set to ${normalizedScope}`);
+    } catch (error) {
+      logger.error(`Failed to set default scope for profile: ${profileName}`, { error });
+      throw new ConfigError(`Failed to set default scope for profile: ${error}`);
+    }
+  }
+
+  /**
    * Set credentials for a profile
    */
   async setProfileCredentials(profileName: string, credentials: ProfileCredentials): Promise<void> {
@@ -110,8 +152,10 @@ class ProfileManager {
         logger.debug('Credentials file does not exist, creating new one');
       }
       
-      // Set the API key for the profile
-      setIniValue(credentialsData, profileName, 'api_key', credentials.api_key);
+      // Set credentials for the profile (API key only)
+      if (credentials.api_key !== undefined) {
+        setIniValue(credentialsData, profileName, 'api_key', credentials.api_key);
+      }
       
       // Write back to file
       await writeIniFile(this.credentialsPath, credentialsData);
@@ -122,6 +166,24 @@ class ProfileManager {
       throw new ConfigError(`Failed to set credentials for profile: ${error}`);
     }
   }
+
+	/**
+	 * Remove stored credentials for a profile without deleting the profile entry.
+	 */
+	async clearProfileCredentials(profileName: string): Promise<void> {
+		try {
+			const credentialsData = await readIniFile(this.credentialsPath);
+			if (!hasIniSection(credentialsData, profileName)) {
+				return;
+			}
+			removeIniSection(credentialsData, profileName);
+			await writeIniFile(this.credentialsPath, credentialsData);
+			logger.info(`Credentials for profile '${profileName}' removed`);
+		} catch (error) {
+			logger.error(`Failed to clear credentials for profile: ${profileName}`, { error });
+			throw new ConfigError(`Failed to clear credentials for profile: ${error}`);
+		}
+	}
 
   /**
    * Delete a profile and its credentials

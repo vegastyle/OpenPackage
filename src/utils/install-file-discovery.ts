@@ -2,55 +2,49 @@ import { packageManager } from '../core/package.js';
 import { FILE_PATTERNS, PACKAGE_PATHS } from '../constants/index.js';
 import type { PackageFile } from '../types/index.js';
 import { getPlatformDefinition, type Platform } from '../core/platforms.js';
+import { buildNormalizedIncludeSet, isManifestPath, normalizePackagePath } from './manifest-paths.js';
 
 export interface CategorizedInstallFiles {
   pathBasedFiles: PackageFile[];
   rootFiles: Map<string, string>;
 }
 
+export async function discoverAndCategorizeFiles(
+  packageName: string,
+  version: string,
+  platforms: Platform[],
+  includePaths?: string[]
+): Promise<CategorizedInstallFiles> {
+  // Load once
+  const pkg = await packageManager.loadPackage(packageName, version);
 
-function collectRootFiles(
-  packageFiles: PackageFile[],
-  platforms: Platform[]
-): Map<string, string> {
-  const rootFiles = new Map<string, string>();
-  // Always consider universal AGENTS.md if present
-  const agents = packageFiles.find(f => f.path === FILE_PATTERNS.AGENTS_MD);
-  if (agents) rootFiles.set(FILE_PATTERNS.AGENTS_MD, agents.content);
+  const normalizedIncludes = buildNormalizedIncludeSet(includePaths);
 
-  // Platform-specific root files
+  const shouldInclude = (path: string): boolean =>
+    !normalizedIncludes || normalizedIncludes.has(normalizePackagePath(path));
+
+  // Precompute platform root filenames
   const platformRootNames = new Set<string>();
   for (const platform of platforms) {
     const def = getPlatformDefinition(platform);
     if (def.rootFile) platformRootNames.add(def.rootFile);
   }
-  for (const file of packageFiles) {
-    if (platformRootNames.has(file.path)) {
-      rootFiles.set(file.path, file.content);
-    }
-  }
-  return rootFiles;
-}
 
-export async function discoverAndCategorizeFiles(
-  packageName: string,
-  version: string,
-  platforms: Platform[]
-): Promise<CategorizedInstallFiles> {
-  // Load once
-  const pkg = await packageManager.loadPackage(packageName, version);
-
-  // Priority 1: Path-based files (all files from package)
+  // Single pass classification
   const pathBasedFiles: PackageFile[] = [];
+  const rootFiles = new Map<string, string>();
   for (const file of pkg.files) {
     const p = file.path;
-    if (p === FILE_PATTERNS.PACKAGE_YML || p === PACKAGE_PATHS.INDEX_RELATIVE) continue; // never install registry package metadata files
-    // Root files handled separately
-    pathBasedFiles.push(file);
-  }
+    // Never install registry package metadata files
+    if (isManifestPath(p) || normalizePackagePath(p) === PACKAGE_PATHS.INDEX_RELATIVE) continue;
+    if (!shouldInclude(p)) continue;
 
-  // Priority 2: Root files (platform root + AGENTS.md)
-  const rootFiles = collectRootFiles(pkg.files, platforms);
+    pathBasedFiles.push(file);
+
+    if (p === FILE_PATTERNS.AGENTS_MD || platformRootNames.has(p)) {
+      rootFiles.set(p, file.content);
+    }
+  }
 
   return { pathBasedFiles, rootFiles };
 }

@@ -13,10 +13,17 @@ export interface ApiPackage {
 }
 
 export interface ApiPackageVersion {
-  version: string;
+  version?: string;
   tarballSize: number;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface PullPackageRequestOptions {
+  version?: string;
+  recursive?: boolean;
+  paths?: string[];
+  includeManifest?: boolean;
 }
 
 export interface PushPackageResponse {
@@ -28,6 +35,7 @@ export interface PushPackageResponse {
 export interface PullPackageDownload {
   name: string;
   downloadUrl?: string;
+  include?: string[];
 }
 
 export interface PullPackageResponse {

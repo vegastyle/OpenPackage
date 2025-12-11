@@ -18,6 +18,7 @@ import { extractRemoteErrorReason } from '../../utils/error-reasons.js';
 import { registryResolver, type RegistryConfig } from '../registry-resolver.js';
 import { join } from 'path';
 import { exists, listDirectories } from '../../utils/fs.js';
+import { UNVERSIONED } from '../../constants/index.js';
 
 export interface VersionSourceSummary {
   localVersions: string[];
@@ -473,8 +474,9 @@ function extractVersionsFromRemoteResponse(response: PullPackageResponse): strin
     }
   }
 
-  if (response.version?.version) {
-    collected.add(response.version.version);
+  if (response.version) {
+    const normalizedVersion = response.version.version ?? UNVERSIONED;
+    collected.add(normalizedVersion);
   }
 
   return Array.from(collected);
@@ -487,8 +489,13 @@ function extractVersionString(candidate: unknown): string | null {
 
   if (candidate && typeof candidate === 'object') {
     const value = (candidate as any).version;
-    if (typeof value === 'string' && semver.valid(value)) {
-      return value;
+    if (value === undefined || value === null) {
+      return UNVERSIONED;
+    }
+    if (typeof value === 'string') {
+      if (semver.valid(value)) {
+        return value;
+      }
     }
   }
 
@@ -502,16 +509,28 @@ function normalizeAndSortVersions(versions: string[]): string[] {
       continue;
     }
     const trimmed = version.trim();
-    if (!trimmed || !semver.valid(trimmed)) {
+    if (!trimmed) {
+      continue;
+    }
+    if (!semver.valid(trimmed)) {
       continue;
     }
     normalized.add(trimmed);
   }
-  return Array.from(normalized).sort(semver.rcompare);
+  const sorted = Array.from(normalized).sort(semver.rcompare);
+  return sorted;
 }
 
 function mergeAndSortVersions(left: string[], right: string[]): string[] {
-  const merged = new Set<string>([...left, ...right]);
-  return Array.from(merged).sort(semver.rcompare);
+  const merged = new Set<string>();
+
+  for (const version of [...left, ...right]) {
+    if (semver.valid(version)) {
+      merged.add(version);
+    }
+  }
+
+  const sorted = Array.from(merged).sort(semver.rcompare);
+  return sorted;
 }
 

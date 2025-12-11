@@ -204,7 +204,9 @@ export function displayPackageConfig(packageConfig: PackageYml, path: string, is
   console.log(`✓ ${path} ${action}`);
 
   console.log(`  - Name: ${packageConfig.name}`);
-  console.log(`  - Version: ${packageConfig.version}`);
+  if (packageConfig.version) {
+    console.log(`  - Version: ${packageConfig.version}`);
+  }
   if (packageConfig.description) {
     console.log(`  - Description: ${packageConfig.description}`);
   }

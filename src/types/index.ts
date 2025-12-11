@@ -12,15 +12,23 @@ export interface OpenPackageDirectories {
   runtime: string;
 }
 
+export interface ConfigDefaults {
+  license?: string;
+}
+
+export interface ProfileConfigDefaults {
+  author?: string;
+  scope?: string;
+}
+
 export interface OpenPackageConfig {
-  defaultAuthor?: string;
-  defaultLicense?: string;
+  defaults?: ConfigDefaults;
   profiles?: Record<string, ProfileConfig>;
 }
 
 export interface ProfileConfig {
   description?: string;
-  defaultScope?: string;
+  defaults?: ProfileConfigDefaults;
 }
 
 export interface ProfileCredentials {
@@ -60,13 +68,20 @@ export interface PackageRepository {
 // Package.yml file types
 export interface PackageDependency {
   name: string;
-  version: string;
+  version?: string;
+  /**
+   * Optional list of registry-relative paths to install for this dependency.
+   * When provided (non-empty), installs are partial and limited to these paths.
+   * When omitted, installs include the full package payload.
+   */
+  include?: string[];
 }
 
 export interface PackageYml {
   name: string;
-  version: string;
+  version?: string;
   private?: boolean;
+  partial?: boolean;
 
   /**
    * Optional glob-like include filters applied relative to the package root.
@@ -168,6 +183,7 @@ export interface PushOptions extends BaseCommandOptions {
   apiKey?: string;
   registry?: string[];  // Multiple custom registries (uses first for push destination)
   noDefaultRegistry?: boolean;  // Exclude default registries
+  paths?: string[];
 }
 
 export interface PullOptions extends BaseCommandOptions {
@@ -176,6 +192,7 @@ export interface PullOptions extends BaseCommandOptions {
   recursive?: boolean;
   registry?: string[];  // Multiple custom registries
   noDefaultRegistry?: boolean;  // Exclude default registries
+  paths?: string[];
 }
 
 export interface ShowOptions extends BaseCommandOptions {
@@ -188,6 +205,7 @@ export interface ShowOptions extends BaseCommandOptions {
 export interface SaveOptions extends BaseCommandOptions {
   force?: boolean;
   rename?: string;
+  platformSpecific?: boolean;
 }
 
 export interface PackOptions extends BaseCommandOptions {

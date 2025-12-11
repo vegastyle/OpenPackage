@@ -899,11 +899,38 @@ export async function installPackageByIndex(
   packageName: string,
   version: string,
   platforms: Platform[],
-  options: InstallOptions
+  options: InstallOptions,
+  includePaths?: string[]
 ): Promise<IndexInstallResult> {
   const registryEntries = await loadRegistryFileEntries(packageName, version);
 
-  const plannedFiles = createPlannedFiles(registryEntries);
+  const normalizedIncludes = includePaths && includePaths.length > 0
+    ? new Set(includePaths.map(p => normalizeRegistryPath(p)))
+    : null;
+
+  const plannedFiles = createPlannedFiles(registryEntries).filter(planned => {
+    if (!normalizedIncludes) return true;
+    return normalizedIncludes.has(normalizeRegistryPath(planned.registryPath));
+  });
+
+  if (normalizedIncludes && plannedFiles.length === 0) {
+    const available = registryEntries.map(e => normalizeRegistryPath(e.registryPath)).sort();
+    const message = `Requested specific file(s) not found in ${packageName}@${version}. Available registry paths: ${available.join(
+      ', '
+    )}`;
+    // Align with package-missing behavior: warn and skip instead of throwing
+    logger.warn(`${message}. Skipping package install.`);
+    return {
+      installed: 0,
+      updated: 0,
+      deleted: 0,
+      skipped: 1,
+      files: [],
+      installedFiles: [],
+      updatedFiles: [],
+      deletedFiles: []
+    };
+  }
   attachTargetsToPlannedFiles(cwd, plannedFiles, platforms);
 
   const groups = groupPlannedFiles(plannedFiles);

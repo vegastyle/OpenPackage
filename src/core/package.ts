@@ -21,16 +21,26 @@ import {
   getLatestPackageVersion,
   listPackageVersions
 } from './directory.js';
-import { parsePackageYml } from '../utils/package-yml.js';
+import { parsePackageYml, writePackageYml } from '../utils/package-yml.js';
 import {
   resolveVersionRange,
   isExactVersion
 } from '../utils/version-ranges.js';
-import { PACKAGE_PATHS } from '../constants/index.js';
+import { PACKAGE_PATHS, UNVERSIONED } from '../constants/index.js';
 
 /**
  * Package management operations
  */
+
+export interface PackageVersionState {
+  exists: boolean;
+  isPartial: boolean;
+  paths: string[];
+}
+
+interface PackageSaveOptions {
+  partial?: boolean;
+}
 
 export class PackageManager {
   
@@ -45,7 +55,9 @@ export class PackageManager {
     
     let targetVersion: string | null;
     
-    if (version) {
+    if (version === UNVERSIONED) {
+      targetVersion = UNVERSIONED;
+    } else if (version) {
       // Check if it's a version range or exact version
       if (isExactVersion(version)) {
         targetVersion = version;
@@ -103,11 +115,11 @@ export class PackageManager {
   /**
    * Save a package to the registry (versioned)
    */
-  async savePackage(pkg: Package): Promise<void> {
+  async savePackage(pkg: Package, options: PackageSaveOptions = {}): Promise<void> {
     const { metadata, files } = pkg;
     const packagePath = getPackageVersionPath(metadata.name, metadata.version);
     
-    logger.debug(`Saving package: ${metadata.name}@${metadata.version}`, { packagePath });
+    logger.debug(`Saving package: ${metadata.name}@${metadata.version ?? UNVERSIONED}`, { packagePath });
     
     try {
       // Ensure the version directory exists
@@ -118,6 +130,11 @@ export class PackageManager {
         const fullPath = join(packagePath, file.path);
         await ensureDir(dirname(fullPath));
         await writeTextFile(fullPath, file.content, (file.encoding as BufferEncoding) || 'utf8');
+      }
+      if (options.partial) {
+        await this.markPartialInManifest(packagePath);
+      } else {
+        await this.clearPartialInManifest(packagePath);
       }
       
       logger.info(`Package '${metadata.name}@${metadata.version}' saved successfully`);
@@ -181,6 +198,35 @@ export class PackageManager {
     const latestVersion = await getLatestPackageVersion(packageName);
     return latestVersion !== null;
   }
+
+  /**
+   * Return local state for a specific package version, including partial metadata.
+   */
+  async getPackageVersionState(packageName: string, version?: string): Promise<PackageVersionState> {
+    const packagePath = getPackageVersionPath(packageName, version);
+    const existsLocally = await exists(packagePath);
+
+    if (!existsLocally) {
+      return { exists: false, isPartial: false, paths: [] };
+    }
+
+    const manifestPath = join(packagePath, PACKAGE_PATHS.MANIFEST_RELATIVE);
+    const manifestExists = await exists(manifestPath);
+    let isPartial = !manifestExists;
+    if (manifestExists) {
+      try {
+        const manifest = await parsePackageYml(manifestPath);
+        isPartial = Boolean((manifest as any).partial);
+      } catch (error) {
+        logger.warn('Failed to read package manifest for partial state', { packageName, version, error });
+        isPartial = true;
+      }
+    }
+
+    const paths = await this.listPackageFilePaths(packagePath);
+
+    return { exists: true, isPartial, paths };
+  }
   
   /**
    * Discover all files in a package directory
@@ -216,8 +262,43 @@ export class PackageManager {
       throw new InvalidPackageError(`Failed to discover package files: ${error}`);
     }
   }
-  
-  
+
+  private async markPartialInManifest(packagePath: string): Promise<void> {
+    const manifestPath = join(packagePath, PACKAGE_PATHS.MANIFEST_RELATIVE);
+    if (!(await exists(manifestPath))) {
+      return;
+    }
+
+    const manifest = await parsePackageYml(manifestPath);
+    (manifest as any).partial = true;
+    await writePackageYml(manifestPath, manifest);
+  }
+
+  private async clearPartialInManifest(packagePath: string): Promise<void> {
+    const manifestPath = join(packagePath, PACKAGE_PATHS.MANIFEST_RELATIVE);
+    if (!(await exists(manifestPath))) {
+      return;
+    }
+
+    const manifest = await parsePackageYml(manifestPath);
+    if ((manifest as any).partial !== undefined) {
+      delete (manifest as any).partial;
+      await writePackageYml(manifestPath, manifest);
+    }
+  }
+
+  private async listPackageFilePaths(packagePath: string): Promise<string[]> {
+    const paths: string[] = [];
+    for await (const fullPath of walkFiles(packagePath)) {
+      const relativePath = relative(packagePath, fullPath);
+      if (isJunk(basename(relativePath))) {
+        continue;
+      }
+      paths.push(relativePath);
+    }
+    paths.sort();
+    return paths;
+  }
 }
 
 // Create and export a singleton instance

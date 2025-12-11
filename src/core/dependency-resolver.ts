@@ -3,7 +3,7 @@ import * as semver from 'semver';
 import { safePrompts } from '../utils/prompts.js';
 import { PackageYml, Package } from '../types/index.js';
 import { packageManager } from './package.js';
-import { getInstalledPackageVersion, scanGroundzeroPackages } from './openpackage.js';
+import { getInstalledPackageVersion, scanOpenPackagePackages } from './openpackage.js';
 import { logger } from '../utils/logger.js';
 import { PackageNotFoundError, PackageVersionNotFoundError, VersionConflictError } from '../utils/errors.js';
 import { hasExplicitPrereleaseIntent } from '../utils/version-ranges.js';
@@ -13,6 +13,7 @@ import { selectInstallVersionUnified, RemoteVersionLookupError } from './install
 import { InstallResolutionMode, type PackageRemoteResolutionOutcome } from './install/types.js';
 import { extractRemoteErrorReason } from '../utils/error-reasons.js';
 import { PACKAGE_PATHS } from '../constants/index.js';
+import { formatVersionLabel } from '../utils/package-versioning.js';
 
 /**
  * Resolved package interface for dependency resolution
@@ -53,6 +54,8 @@ interface DependencyResolverOptions {
   apiKey?: string;
   onWarning?: (message: string) => void;
   preferStable?: boolean;
+  registry?: string[];
+  noDefaultRegistry?: boolean;
 }
 
 export interface ResolveDependenciesResult {
@@ -142,9 +145,15 @@ export async function resolveDependencies(
     }
   }
 
-  const hasConstraints = allRanges.length > 0;
   const dedupedRanges = Array.from(new Set(allRanges));
-  const combinedRangeLabel = hasConstraints ? dedupedRanges.join(' & ') : undefined;
+  const normalizedRanges = dedupedRanges.map(r => r.trim()).filter(Boolean);
+  const isWildcardRange = (range: string) => {
+    const normalized = range.toLowerCase();
+    return normalized === '*' || normalized === 'latest';
+  };
+  const constraintRanges = normalizedRanges.filter(range => !isWildcardRange(range));
+  const hasConstraints = constraintRanges.length > 0;
+  const combinedRangeLabel = hasConstraints ? constraintRanges.join(' & ') : undefined;
 
   const filterAvailableVersions = (versions: string[]): string[] => {
     if (!hasConstraints) {
@@ -152,7 +161,7 @@ export async function resolveDependencies(
     }
 
     return versions.filter(versionCandidate => {
-      return allRanges.every(range => {
+      return constraintRanges.every(range => {
         try {
           return semver.satisfies(versionCandidate, range, { includePrerelease: true });
         } catch (error) {
@@ -178,6 +187,8 @@ export async function resolveDependencies(
       explicitPrereleaseIntent,
       profile: resolverOptions.profile,
       apiKey: resolverOptions.apiKey,
+      customRegistries: resolverOptions.registry,
+      noDefaultRegistry: resolverOptions.noDefaultRegistry,
       localVersions,
       filterAvailableVersions
     });
@@ -229,13 +240,14 @@ export async function resolveDependencies(
         ranges: allRanges,
         availableVersions: selectionResult.sources.availableVersions
       });
+    } else {
+      missing.add(packageName);
+      return buildResolveResult(resolvedPackages, missing, remoteOutcomes);
     }
-
-    missing.add(packageName);
-    return buildResolveResult(resolvedPackages, missing, remoteOutcomes);
+  } else {
+    resolvedVersion = selectionResult.selectedVersion;
   }
 
-  resolvedVersion = selectionResult.selectedVersion;
   versionRange = combinedRangeLabel;
   resolutionSource =
     selectionResult.resolutionSource ?? (resolutionMode === 'remote-primary' ? 'remote' : 'local');
@@ -563,8 +575,8 @@ export function displayDependencyTree(resolvedPackages: ResolvedPackage[], silen
 export async function buildDependencyTree(openpackagePath: string, protectedPackages: Set<string>): Promise<Map<string, DependencyNode>> {
   const dependencyTree = new Map<string, DependencyNode>();
   
-  // Use the shared scanGroundzeroPackages function
-  const packages = await scanGroundzeroPackages(openpackagePath);
+  // Use the shared scanOpenPackagePackages function
+  const packages = await scanOpenPackagePackages(openpackagePath);
   
   // First pass: collect all packages and their dependencies
   for (const [packageName, pkg] of packages) {
@@ -582,7 +594,7 @@ export async function buildDependencyTree(openpackagePath: string, protectedPack
     
     dependencyTree.set(packageName, {
       name: packageName,
-      version: pkg.version,
+      version: formatVersionLabel(pkg.version),
       dependencies,
       dependents: new Set(),
       isProtected: protectedPackages.has(packageName)

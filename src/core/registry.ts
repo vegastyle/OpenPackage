@@ -298,8 +298,10 @@ export class RegistryManager {
             issues.push(`Name mismatch in package '${pkg.name}': package.yml says '${metadata.name}'`);
           }
 
-          if (semver.neq(metadata.version, pkg.version)) {
-            issues.push(`Version mismatch in package '${pkg.name}': registry says '${pkg.version}', package.yml says '${metadata.version}'`);
+          if (metadata.version && pkg.version && semver.valid(metadata.version) && semver.valid(pkg.version)) {
+            if (semver.neq(metadata.version, pkg.version)) {
+              issues.push(`Version mismatch in package '${pkg.name}': registry says '${pkg.version}', package.yml says '${metadata.version}'`);
+            }
           }
 
         } catch (error) {

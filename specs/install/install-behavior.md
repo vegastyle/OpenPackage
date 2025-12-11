@@ -23,6 +23,9 @@ This document defines the **user-facing behavior** of the `install` command, ass
     - If `<name>` is **already declared** in `package.yml`: `<spec>` is treated as a **constraint hint** that must be **compatible** with the canonical `package.yml` range (see `package-yml-canonical.md` for rules); resolution still uses the same **local-first with remote-fallback** semantics unless `--local` or `--remote` are set.
     - If `<name>` is **not declared**: `<spec>` is treated as the **initial version range** to store in `package.yml`, and resolution uses the **local-first with remote-fallback** policy under that range (or strictly local / remote when the corresponding flags are set).
 
+- **`opkg install <name>/<registry-path>`** and **`opkg install <name>@<spec>/<registry-path>`**
+  - **Meaning**: Install only the specified registry-relative path(s) for `<name>` (e.g. `.openpackage/universal/prompts/foo.md`, `workspace/agents.md`). The path must be an **exact registry path** (no globs) and applies only to the **root dependency** being installed.
+
 Other flags (`--dev`, `--remote`, `--platforms`, `--dry-run`, `--stable`, conflicts) keep their existing semantics unless overridden below.
 
 ---
@@ -70,6 +73,7 @@ Other flags (`--dev`, `--remote`, `--platforms`, `--dry-run`, `--stable`, confli
     - **Install `<name>@<selectedVersion>`**.
     - **Add to `package.yml`**:
       - Default range is **caret based on the stable base** of the selected version (e.g. `^1.0.1` for `1.0.1-000fz8.a3k`), unless later overridden by a global policy.
+      - When the selected version is **unversioned** (manifest omits `version`, represented internally as `0.0.0`), persist the entry **without a `version` field** in `packages` / `dev-packages` (do **not** write `0.0.0`).
 
   - **Case B – `opkg install <name>@<spec>`**:
     - Treat `<spec>` as the **initial canonical range**:
@@ -99,6 +103,32 @@ Other flags (`--dev`, `--remote`, `--platforms`, `--dry-run`, `--stable`, confli
     - Treat `<spec>` as a **sanity check** against the canonical range:
       - If compatible (according to rules in `package-yml-canonical.md`), proceed as above.
       - If incompatible, **fail with a clear error** instructing the user to edit `package.yml` instead of using CLI-only overrides.
+
+### 3.4 Registry-path / single-file installs
+
+- **Inputs**:
+  - `opkg install <name>/<registry-path>` (optionally with `@<spec>`).
+  - `<registry-path>` is a registry-relative file path (no globs, exact match against registry entries).
+
+- **Behavior – fresh dependency**:
+  - Resolve the version using the same policies as §3.1 (respecting `<spec>` if provided).
+  - Install only the specified registry path(s), including root files only when they are explicitly listed.
+  - Persist a new `files: [<registry-path>, ...]` list for the dependency in `package.yml` alongside the chosen range.
+  - If the requested path does not exist in the selected version, the install **warns and skips the package** (no files written, counts as `skipped`).
+
+- **Behavior – existing dependency with `files` already in `package.yml`**:
+  - `opkg install <name>` (no new path):
+    - Re-installs the stored subset.
+    - In an interactive TTY and non-`--dry-run`, prompt: **switch to full install?** If accepted, clears the `files` list and performs a full install; otherwise keeps the subset.
+    - In non-interactive or `--dry-run`, keep the stored subset automatically (no prompt).
+  - `opkg install <name>/<registry-path>`:
+    - Adds the new path to the stored `files` list (deduped), then installs that combined subset.
+
+- **Behavior – existing dependency without `files` (full install)**:
+  - Path-based install attempts are **rejected** with a clear error. To install a subset, uninstall first (or remove the dependency) and re-install with a path, or edit `package.yml` manually to add `files`.
+
+- **Switching back to full**:
+  - Accept the prompt described above, or delete the `files` field for the dependency in `package.yml` (or uninstall/reinstall without a path).
 
 ---
 

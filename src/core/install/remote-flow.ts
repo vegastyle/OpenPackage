@@ -1,8 +1,14 @@
 import type { RemotePackageMetadataSuccess, RemoteBatchPullResult, RemotePullFailure } from '../remote-pull.js';
 import type { ResolvedPackage } from '../dependency-resolver.js';
 import type { PackageRemoteResolutionOutcome } from './types.js';
-import { fetchRemotePackageMetadata, pullDownloadsBatchFromRemote, aggregateRecursiveDownloads, parseDownloadName } from '../remote-pull.js';
-import { hasPackageVersion } from '../directory.js';
+import {
+  fetchRemotePackageMetadata,
+  pullDownloadsBatchFromRemote,
+  aggregateRecursiveDownloads,
+  parseDownloadIdentifier,
+  isPartialDownload
+} from '../remote-pull.js';
+import { packageManager } from '../package.js';
 import { getVersionInfoFromDependencyTree } from '../../utils/install-helpers.js';
 import { promptOverwriteConfirmation } from '../../utils/prompts.js';
 import { Spinner } from '../../utils/spinner.js';
@@ -245,18 +251,30 @@ export async function pullMissingDependenciesIfNeeded(
  */
 export async function planRemoteDownloadsForPackage(
   metadata: RemotePackageMetadataSuccess,
-  opts: { forceRemote: boolean; dryRun: boolean }
+  opts: { forceRemote?: boolean; dryRun?: boolean } = {}
 ): Promise<{ downloadKeys: Set<string>; warnings: string[] }> {
-  const { forceRemote, dryRun } = opts;
+  const { forceRemote = true, dryRun = false } = opts;
   const aggregatedDownloads = aggregateRecursiveDownloads([metadata.response]);
   const downloadKeys = new Set<string>();
   const warnings: string[] = [];
 
   for (const download of aggregatedDownloads) {
     try {
-      const { name: downloadName, version: downloadVersion } = parseDownloadName(download.name);
+      const { packageName: downloadName, version: downloadVersion } = parseDownloadIdentifier(download.name);
       const key = createDownloadKey(downloadName, downloadVersion);
-      const existsLocally = await hasPackageVersion(downloadName, downloadVersion);
+      const isPartial = isPartialDownload(download);
+      const localState = await packageManager.getPackageVersionState(downloadName, downloadVersion);
+      const existsLocally = localState.exists;
+
+      if (isPartial) {
+        if (existsLocally && !localState.isPartial) {
+          const skipMessage = `${key} already exists locally as a full package; skipping partial pull`;
+          warnings.push(skipMessage);
+          continue;
+        }
+        downloadKeys.add(key);
+        continue;
+      }
 
       if (forceRemote) {
         let shouldDownload = true;

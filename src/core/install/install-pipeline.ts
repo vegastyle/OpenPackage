@@ -19,17 +19,26 @@ import { pullMissingDependenciesIfNeeded } from './remote-flow.js';
 import { handleDryRunMode } from './dry-run.js';
 import { displayInstallationResults, formatSelectionSummary } from './install-reporting.js';
 import { buildNoVersionFoundError } from './install-errors.js';
-import { createWorkspacePackageYml, addPackageToYml, writeLocalPackageFromRegistry } from '../../utils/package-management.js';
+import {
+  createWorkspacePackageYml,
+  addPackageToYml,
+  writeLocalPackageFromRegistry,
+  writePartialLocalPackageFromRegistry,
+  updatePackageDependencyInclude
+} from '../../utils/package-management.js';
 import { resolvePlatforms } from './platform-resolution.js';
 import { getLocalPackageYmlPath, getInstallRootDir, isRootPackage } from '../../utils/paths.js';
 import { exists } from '../../utils/fs.js';
 import { logger } from '../../utils/logger.js';
 import { PackageNotFoundError } from '../../utils/errors.js';
+import { safePrompts } from '../../utils/prompts.js';
+import { normalizeRegistryPath } from '../../utils/registry-entry-filter.js';
 
 export interface InstallPipelineOptions extends InstallOptions {
   packageName: string;
   version?: string;
   targetDir: string;
+  registryPath?: string;
 }
 
 export interface InstallPipelineResult {
@@ -39,7 +48,7 @@ export interface InstallPipelineResult {
   totalPackages: number;
   installed: number;
   skipped: number;
-  totalGroundzeroFiles: number;
+  totalOpenPackageFiles: number;
 }
 
 export function determineResolutionMode(
@@ -58,6 +67,54 @@ export function determineResolutionMode(
   }
 
   return 'default';
+}
+
+function dedupeRegistryPaths(paths: string[]): string[] {
+  return Array.from(new Set(paths.map(p => normalizeRegistryPath(p))));
+}
+
+async function resolveInstallIntent(args: {
+  packageName: string;
+  dependencyState: 'fresh' | 'existing';
+  existingInclude?: string[];
+  normalizedRegistryPath?: string;
+  dryRun: boolean;
+  canPrompt: boolean;
+}): Promise<{ installPaths?: string[]; persistInclude?: string[] | null }> {
+  const { packageName, dependencyState, existingInclude, normalizedRegistryPath, dryRun, canPrompt } = args;
+
+  // Path-based request
+  if (normalizedRegistryPath) {
+    if (dependencyState === 'existing' && !existingInclude) {
+      throw new Error(
+        `${packageName} is already a full dependency. To install a subset, uninstall the package first and re-install subset.`
+      );
+    }
+    const base = existingInclude ?? [];
+    const next = dedupeRegistryPaths([...base, normalizedRegistryPath]);
+    return { installPaths: next, persistInclude: next };
+  }
+
+  // Existing partial dependency, no path provided
+  if (existingInclude) {
+    if (!dryRun && canPrompt) {
+      const prompt = await safePrompts({
+        type: 'confirm',
+        name: 'confirmFull',
+        message: `Switch ${packageName} to full install? This will reinstall with full package content.`,
+        initial: false
+      });
+      const switchToFull = Boolean((prompt as any).confirmFull);
+      if (switchToFull) {
+        return { installPaths: undefined, persistInclude: null };
+      }
+      return { installPaths: existingInclude, persistInclude: existingInclude };
+    }
+    return { installPaths: existingInclude, persistInclude: existingInclude };
+  }
+
+  // Default full install
+  return { installPaths: undefined, persistInclude: undefined };
 }
 
 export async function runInstallPipeline(
@@ -82,7 +139,7 @@ export async function runInstallPipeline(
         totalPackages: 0,
         installed: 0,
         skipped: 1,
-        totalGroundzeroFiles: 0
+        totalOpenPackageFiles: 0
       }
     };
   }
@@ -101,6 +158,24 @@ export async function runInstallPipeline(
     console.log(`ℹ️  ${canonicalPlan.compatibilityMessage}`);
   }
 
+  const normalizedRegistryPath = options.registryPath
+    ? normalizeRegistryPath(options.registryPath)
+    : undefined;
+
+  const existingInclude =
+    canonicalPlan.dependencyInclude && canonicalPlan.dependencyInclude.length > 0
+      ? dedupeRegistryPaths(canonicalPlan.dependencyInclude)
+      : undefined;
+
+  const { installPaths, persistInclude } = await resolveInstallIntent({
+    packageName: options.packageName,
+    dependencyState: canonicalPlan.dependencyState,
+    existingInclude,
+    normalizedRegistryPath,
+    dryRun,
+    canPrompt: Boolean(process.stdin.isTTY && process.stdout.isTTY)
+  });
+
   const selectionOptions = options.stable ? { preferStable: true } : undefined;
   const preselection = await selectInstallVersionUnified({
     packageName: options.packageName,
@@ -108,7 +183,9 @@ export async function runInstallPipeline(
     mode: resolutionMode,
     selectionOptions,
     profile: options.profile,
-    apiKey: options.apiKey
+    apiKey: options.apiKey,
+    customRegistries: options.registry,
+    noDefaultRegistry: options.noDefaultRegistry
   });
 
   preselection.sources.warnings.forEach(message => {
@@ -240,7 +317,7 @@ export async function runInstallPipeline(
         totalPackages: 0,
         installed: 0,
         skipped: 1,
-        totalGroundzeroFiles: 0
+        totalOpenPackageFiles: 0
       }
     };
   }
@@ -267,30 +344,59 @@ export async function runInstallPipeline(
     : await resolvePlatforms(cwd, specifiedPlatforms, { interactive: canPromptForPlatforms });
   const createdDirs = await createPlatformDirectories(cwd, finalPlatforms as Platform[]);
 
+  const fileFilters =
+    installPaths && installPaths.length > 0 ? { [options.packageName]: installPaths } : undefined;
+
   const installationOutcome = await performIndexBasedInstallationPhases({
     cwd,
     packages: finalResolvedPackages,
     platforms: finalPlatforms as Platform[],
     conflictResult,
     options,
-    targetDir: options.targetDir
+    targetDir: options.targetDir,
+    fileFilters
   });
 
   for (const resolved of finalResolvedPackages) {
+    const partialPaths = fileFilters?.[resolved.name];
+    if (partialPaths && partialPaths.length > 0) {
+      await writePartialLocalPackageFromRegistry(cwd, resolved.name, resolved.version, partialPaths);
+      continue;
+    }
     await writeLocalPackageFromRegistry(cwd, resolved.name, resolved.version);
   }
 
   const mainPackage = finalResolvedPackages.find(pkg => pkg.isRoot);
   if (packageYmlExists && mainPackage) {
     const persistTarget = resolvePersistRange(canonicalPlan.persistDecision, mainPackage.version);
+    const includeTarget =
+      persistInclude === undefined
+        ? undefined
+        : persistInclude === null
+          ? null
+          : dedupeRegistryPaths(persistInclude);
+
+    const targetDependencyArray =
+      persistTarget?.target ??
+      canonicalPlan.canonicalTarget ??
+      ((options.dev ?? false) ? 'dev-packages' : 'packages');
+
     if (persistTarget) {
       await addPackageToYml(
         cwd,
         options.packageName,
         mainPackage.version,
-        persistTarget.target === 'dev-packages',
+        targetDependencyArray === 'dev-packages',
         persistTarget.range,
-        true
+        true,
+        includeTarget ?? undefined
+      );
+    } else if (includeTarget !== undefined) {
+      await updatePackageDependencyInclude(
+        cwd,
+        options.packageName,
+        targetDependencyArray,
+        includeTarget
       );
     }
   }
@@ -317,7 +423,7 @@ export async function runInstallPipeline(
       totalPackages: finalResolvedPackages.length,
       installed: installationOutcome.installedCount,
       skipped: installationOutcome.skippedCount,
-      totalGroundzeroFiles: installationOutcome.totalGroundzeroFiles
+      totalOpenPackageFiles: installationOutcome.totalOpenPackageFiles
     },
     warnings: warnings.length > 0 ? Array.from(new Set(warnings)) : undefined
   };
